@@ -60,7 +60,15 @@ Under **Authentication → Settings → Authorized domains**, add the game's dom
 
 The game understands common questions by itself. For everything else, it asks a free Cloudflare AI.
 
-1. In Cloudflare, go to **Compute → Workers & Pages → Create → Create Worker** (Start with Hello World). Name it `interrogate-ai` and click **Deploy**.
+1. Cloudflare: **Compute → Workers & Pages → Create → Start with Hello World!**. Name it `interrogate-ai` and click **Deploy**.
 2. Click **Edit code**. Delete everything, paste in all of `question-ai-worker.js`, and click **Deploy**.
-3. Go back to the worker, open **Settings → Bindings → Add → Workers AI**. Variable name: `AI`. Save.
-4. Copy the worker's address (it ends in `.workers.dev`) and send it to Claude, or put it in `firebase-config.js` as `window.QUESTION_AI_URL = "https://...workers.dev";`
+3. Answer cache (keeps it free at scale): **Storage & databases → D1 → Create database**, name it `interrogate-cache`, create it.
+4. Open the worker: **Settings → Bindings → Add**:
+   - **Workers AI**, variable name `AI`.
+   - **D1 database**, variable name `DB`, database `interrogate-cache`.
+5. Copy the worker's address (ends in `.workers.dev`) and send it to Claude.
+
+# If the game gets huge
+
+- Firebase's free plan allows about 20,000 stat updates a day. If the Owner stats page stops growing, set `window.STATS_SAMPLE = 0.05;` in `firebase-config.js` to count 1 in 20 games. The page scales the numbers back up.
+- Cloudflare Workers' free plan allows 100,000 AI-reader requests a day. Only questions the game can't match itself, and that no one has asked before about that day's secret, reach the AI.

@@ -14,6 +14,11 @@ window.FIREBASE_CONFIG = {
 // Leave as null and the game still understands common questions on its own.
 window.QUESTION_AI_URL = null;
 
+// Share of games counted in the owner stats (1 = every game). If the game goes huge and
+// Firebase's free daily writes run out, lower this (e.g. 0.05 = 1 in 20). The stats page
+// scales the numbers back up.
+window.STATS_SAMPLE = 1;
+
 // Firebase user IDs allowed to see everyone's stats on the Owner stats page.
 // See SETUP.md, step 6.
 window.OWNER_UIDS = ["kzeEdCTMgHNc4N0l6pIXHCgovzU2"];

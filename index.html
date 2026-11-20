@@ -186,11 +186,39 @@ const norm = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").repla
 
 /* ---------- metrics (this device until the game is online) ---------- */
 function playerId() { let p = store.get("tp2:pid"); if (!p) { p = Math.random().toString(36).slice(2, 10); store.set("tp2:pid", p); } return p; }
+// Stats are kept as running totals: one small document per release day, bumped with
+// increments. That's one database write per event and only a handful of reads to show
+// everything. If traffic gets huge, lower STATS_SAMPLE in firebase-config.js (say 0.05):
+// only that share of games is counted, and the owner page scales the numbers back up.
+function statsDelta(type, data) {
+  const u = {};
+  if (type === "start") {
+    u.started = 1; if (data.practice) u.practice = 1;
+    u[`pick_${data.mode}_${data.me}`] = 1;
+    if (store.get("tp2:lastActive") !== dateKey()) { store.set("tp2:lastActive", dateKey()); u.players = 1; }
+  }
+  if (type === "end") {
+    u.finished = 1;
+    if (data.win === "you") { u.wins_you = 1; u.turns_to_win = data.yt; }
+    if (data.win === "ai") u.wins_ai = 1;
+    if (data.myLie) u.lied_you = 1;
+    if (data.aiLie) u.lied_ai = 1;
+    if (data.open) u.open_questions = data.open;
+    for (const k of data.asked || []) { const f = `ask_${data.mode}_${k.startsWith("b:") ? "border" : k}`; u[f] = (u[f] || 0) + 1; }
+  }
+  if (type === "share") u.shares = 1;
+  return u;
+}
 function track(type, data = {}) {
-  const ev = { t: Date.now(), pid: playerId(), type, ...data };
-  if (user) ev.uid = user.uid;
-  const a = store.get("tp2:events", []); a.push(ev); if (a.length > 5000) a.splice(0, a.length - 5000); store.set("tp2:events", a);
-  if (FB) FB.db.collection("events").add(ev).catch(() => {});
+  const u = statsDelta(type, data), day = dateKey();
+  const local = store.get("tp2:stats", {}); local[day] = local[day] || {};
+  for (const k in u) local[day][k] = (local[day][k] || 0) + u[k];
+  store.set("tp2:stats", local);
+  const rate = typeof window.STATS_SAMPLE === "number" ? window.STATS_SAMPLE : 1;
+  if (!FB || Math.random() >= rate) return;
+  const inc = firebase.firestore.FieldValue.increment, doc = { sample: rate };
+  for (const k in u) doc[k] = inc(u[k]);
+  FB.db.collection("stats").doc(day).set(doc, { merge: true }).catch(() => {});
 }
 
 /* ---------- accounts (Firebase) ---------- */
@@ -528,54 +556,55 @@ function helpHTML() {
 }
 
 /* ---------- owner metrics ---------- */
-let remoteEvents = null;
-async function loadRemoteEvents() {
-  try { const snap = await FB.db.collection("events").orderBy("t", "desc").limit(20000).get(); remoteEvents = snap.docs.map(d => d.data()); }
-  catch (e) { remoteEvents = []; console.warn(e); }
+let remoteStats = null;
+async function loadRemoteStats() {
+  try {
+    const snap = await FB.db.collection("stats").orderBy(firebase.firestore.FieldPath.documentId(), "desc").limit(90).get();
+    remoteStats = {};
+    snap.forEach(d => {
+      const raw = d.data(), scale = raw.sample && raw.sample < 1 ? 1 / raw.sample : 1, row = {};
+      for (const k in raw) if (k !== "sample" && typeof raw[k] === "number") row[k] = Math.round(raw[k] * scale);
+      row._sampled = scale > 1; remoteStats[d.id] = row;
+    });
+  } catch (e) { remoteStats = {}; console.warn(e); }
   if (view === "stats") render();
 }
 function metricsHTML() {
   const everyone = !!(FB && isOwner());
-  if (everyone && !remoteEvents) { loadRemoteEvents(); return `<section class="card"><p class="muted">Loading everyone's games…</p></section>`; }
-  const ev = everyone ? remoteEvents : store.get("tp2:events", []);
+  if (everyone && !remoteStats) { loadRemoteStats(); return `<section class="card"><p class="muted">Loading everyone's games…</p></section>`; }
+  const days = everyone ? remoteStats : store.get("tp2:stats", {});
   const source = everyone ? "These numbers cover every player's games."
     : FB && user ? `These numbers only cover this browser. To see everyone's games, add your user ID <code>${esc(user.uid)}</code> to OWNER_UIDS in firebase-config.js and to the database rules (SETUP.md, step 6).`
     : FB ? "These numbers only cover this browser. Log in with the owner account to see everyone's games."
-    : "These numbers only cover games played in this browser. Once the game is connected to Firebase, the same events go to a shared database and this page shows everyone's games.";
-  const starts = ev.filter(e => e.type === "start"), ends = ev.filter(e => e.type === "end");
-  const daily = ends.filter(e => !e.practice);
+    : "These numbers only cover games played in this browser.";
+  const T = {};
+  for (const r of Object.values(days)) for (const k in r) if (typeof r[k] === "number") T[k] = (T[k] || 0) + r[k];
+  const n = k => T[k] || 0;
   const pct = (a, b) => b ? Math.round(100 * a / b) + "%" : "—";
-  const avg = a => a.length ? (a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : "—";
-  const top = (arr, n = 8) => Object.entries(arr.reduce((o, k) => (o[k] = (o[k] || 0) + 1, o), {})).sort((a, b) => b[1] - a[1]).slice(0, n);
-  const byDay = {};
-  for (const e of ev) { const d = dateKey(new Date(e.t)); byDay[d] = byDay[d] || { s: 0, f: 0, w: 0, sh: 0, p: new Set() }; const r = byDay[d]; r.p.add(e.pid); if (e.type === "start") r.s++; if (e.type === "end") { r.f++; if (e.win === "you") r.w++; } if (e.type === "share") r.sh++; }
-  const names = (mk, id) => (MODES[mk] && MODES[mk].byId[id]) ? MODES[mk].byId[id].name : id;
+  const sampled = Object.values(days).some(r => r._sampled);
+  const top = (prefix, count) => Object.entries(T).filter(([k]) => k.startsWith(prefix)).sort((a, b) => b[1] - a[1]).slice(0, count);
   const tile = (label, v) => `<div style="background:var(--chip);border-radius:10px;padding:10px 12px"><span class="muted">${label}</span><b style="display:block;font:700 22px var(--display)">${v}</b></div>`;
+  const qLabel = (mk, q) => q === "border" ? "Does it border …?" : (MODES[mk] && MODES[mk].qByK[q] ? MODES[mk].qByK[q].t : q);
+  const rows = (list, label) => list.length ? list.map(([k, v]) => `<tr><td>${label(k)}</td><td>${v}</td></tr>`).join("") : `<tr><td class="muted">No games yet.</td></tr>`;
   return `<section class="card stack">
     <div class="row" style="justify-content:space-between"><h1>Owner stats</h1><a class="btn" href="#">Back to the game</a></div>
-    <p class="muted">${source}</p>
+    <p class="muted">${source}${sampled ? " Some days were sampled, so their numbers are estimates." : ""}</p>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
-      ${tile("Players", new Set(ev.map(e => e.pid)).size)}${tile("Duels started", starts.length)}${tile("Duels finished", ends.length)}
-      ${tile("Finish rate", pct(ends.length, starts.length))}${tile("Player win rate", pct(ends.filter(e => e.win === "you").length, ends.length))}${tile("Avg turns to win", avg(ends.filter(e => e.win === "you").map(e => e.yt)))}
-      ${tile("Players who lied", pct(ends.filter(e => e.myLie).length, ends.length))}${tile("Duels where AI lied", pct(ends.filter(e => e.aiLie).length, ends.length))}${tile("Share clicks", ev.filter(e => e.type === "share").length)}
-      ${tile("Daily vs practice", `${daily.length} / ${ends.length - daily.length}`)}
+      ${tile("Player-days", n("players"))}${tile("Duels started", n("started"))}${tile("Duels finished", n("finished"))}
+      ${tile("Finish rate", pct(n("finished"), n("started")))}${tile("Player win rate", pct(n("wins_you"), n("finished")))}${tile("Avg turns to win", n("wins_you") ? (n("turns_to_win") / n("wins_you")).toFixed(1) : "—")}
+      ${tile("Players who lied", pct(n("lied_you"), n("finished")))}${tile("Duels where AI lied", pct(n("lied_ai"), n("finished")))}${tile("Share clicks", n("shares"))}
+      ${tile("Practice rounds", n("practice"))}${tile("Free-form questions", n("open_questions"))}
     </div>
     <h3 class="mt">By day</h3>
-    <div class="tablewrap"><table class="facts"><tr><td><b>Date</b></td><td>Players · started · finished · won · shared</td></tr>
-      ${Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0])).map(([d, r]) => `<tr><td>${d}</td><td>${r.p.size} · ${r.s} · ${r.f} · ${r.w} · ${r.sh}</td></tr>`).join("") || `<tr><td colspan="2" class="muted">No games yet.</td></tr>`}</table></div>
+    <div class="tablewrap"><table class="facts"><tr><td><b>Release day</b></td><td>Players · started · finished · won · shared</td></tr>
+      ${Object.entries(days).sort((a, b) => b[0].localeCompare(a[0])).map(([d, r]) => `<tr><td>${d}</td><td>${r.players || 0} · ${r.started || 0} · ${r.finished || 0} · ${r.wins_you || 0} · ${r.shares || 0}</td></tr>`).join("") || `<tr><td colspan="2" class="muted">No games yet.</td></tr>`}</table></div>
     <h3 class="mt">Most picked secrets</h3>
-    <div class="tablewrap"><table class="facts">${top(ends.map(e => e.mode + ":" + e.me)).map(([k, n]) => { const [mk, id] = k.split(":"); return `<tr><td>${esc(names(mk, id))}</td><td>${n}</td></tr>`; }).join("") || `<tr><td class="muted">No games yet.</td></tr>`}</table></div>
+    <div class="tablewrap"><table class="facts">${rows(top("pick_", 8), k => { const [, mk, id] = k.split("_"); return esc(MODES[mk] && MODES[mk].byId[id] ? MODES[mk].byId[id].name : id); })}</table></div>
     <h3 class="mt">Most asked questions</h3>
-    <div class="tablewrap"><table class="facts">${top(ends.flatMap(e => (e.asked || []).map(k => e.mode + ":" + k)), 10).map(([k, n]) => { const [mk, q] = k.split(":"); const m = MODES[mk]; const t = q.startsWith("b:") ? "Does it border …?" : (m && m.qByK[q] ? m.qByK[q].t : q); return `<tr><td>${esc(t)} <span class="muted">(${esc(m ? m.label : mk)})</span></td><td>${n}</td></tr>`; }).join("") || `<tr><td class="muted">No games yet.</td></tr>`}</table></div>
-    <div class="row mt"><button class="btn" id="exportEv">Copy raw events</button><span class="muted" id="exMsg"></span></div>
+    <div class="tablewrap"><table class="facts">${rows(top("ask_", 10), k => { const [, mk, ...q] = k.split("_"); return `${esc(qLabel(mk, q.join("_")))} <span class="muted">(${esc(MODES[mk] ? MODES[mk].label : mk)})</span>`; })}</table></div>
   </section>`;
 }
-function bindMetrics() {
-  $("exportEv").onclick = () => {
-    const t = JSON.stringify(store.get("tp2:events", []));
-    navigator.clipboard.writeText(t).then(() => $("exMsg").textContent = "Copied.").catch(() => $("exMsg").textContent = "Couldn't copy here.");
-  };
-}
+function bindMetrics() {}
 
 /* ---------- interactions ---------- */
 function bind() {
@@ -620,7 +649,7 @@ function finish(win) {
     S.counted = true;
     recordResult(`${modeKey}:${S.day}`, { win, yt: S.yt, at: S.at, date: S.date });
   }
-  track("end", { mode: modeKey, day: S.day, practice: S.practice, win, yt: S.yt, at: S.at, myLie: S.myLie, aiLie: S.aiLie, me: S.me, ai: S.ai, asked: Object.keys(S.yAsked) });
+  track("end", { mode: modeKey, day: S.day, practice: S.practice, win, yt: S.yt, at: S.at, myLie: S.myLie, aiLie: S.aiLie, me: S.me, ai: S.ai, asked: Object.keys(S.yAsked), open: S.log.filter(e => e.k === "open").length });
   save(); render(); window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -748,6 +777,7 @@ async function handleQuestion(raw) {
       return askOpen(text, r.answer === "yes");
     case "clarify": return say(`<div class="pickbox"><p><b>Quick question back:</b> ${esc(r.message || "Can you say that more specifically?")}</p><p class="muted" style="margin-top:6px">Rephrase and ask again. This doesn't use a turn.</p></div>`);
     case "invalid": return say(`<p class="err">${esc(r.message || "That needs a yes or no answer. Try rephrasing it.")}</p>`);
+    case "busy": return say(`<p class="err">Lots of questions are coming in right now. Wait a few seconds and ask again. This doesn't use a turn.</p>`);
     default: return say(`<p class="err">I couldn't understand that one. Try asking it a simpler way, like "Is it in Asia?"</p>`);
   }
 }
