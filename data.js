@@ -41,7 +41,7 @@ const C_NAMES = {
   CPV: [null, "Cabo Verde"],
   GMB: [null, "The Gambia"],
   BHS: [null, "The Bahamas"],
-  USA: [null, "USA|US|America|United States of America"],
+  USA: [null, "USA|US|United States of America"],
   GBR: [null, "UK|Britain|Great Britain|England"],
   VAT: [null, "Holy See|Vatican"],
   FSM: [null, "Federated States of Micronesia"],

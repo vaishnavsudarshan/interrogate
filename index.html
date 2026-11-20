@@ -165,17 +165,31 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
-const EPOCH = new Date(2026, 10, 19);
-function dateKey(d = new Date()) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
-function dayNumber(d = new Date()) { const a = new Date(d.getFullYear(), d.getMonth(), d.getDate()); return Math.max(1, Math.round((a - EPOCH) / 864e5) + 1); }
+// A new duel goes out everywhere at the same moment: noon Pacific time.
+// Duel #1 is the one released on LAUNCH_DATE (it's also playable before that noon).
+const RELEASE_TZ = "America/Los_Angeles", RELEASE_HOUR = 12, LAUNCH_DATE = "2026-11-20";
+function pacificParts(d) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: RELEASE_TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(d).map(x => [x.type, x.value]));
+  return { y: +p.year, m: +p.month, d: +p.day, h: +p.hour, mi: +p.minute, s: +p.second };
+}
+// Release date ("YYYY-MM-DD") of the duel that's live at moment d.
+function dateKey(d = new Date()) {
+  const p = pacificParts(d);
+  return new Date(Date.UTC(p.y, p.m - 1, p.d) - (p.h < RELEASE_HOUR ? 864e5 : 0)).toISOString().slice(0, 10);
+}
+function dayNumber(d = new Date()) { return Math.max(1, Math.round((Date.parse(dateKey(d)) - Date.parse(LAUNCH_DATE)) / 864e5) + 1); }
+function secondsToNextDuel() {
+  const p = pacificParts(new Date());
+  return ((RELEASE_HOUR * 3600 - (p.h * 3600 + p.mi * 60 + p.s) + 86400) % 86400) || 86400;
+}
 const norm = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 
 /* ---------- metrics (this device until the game is online) ---------- */
-function playerId() { let p = store.get("tp1:pid"); if (!p) { p = Math.random().toString(36).slice(2, 10); store.set("tp1:pid", p); } return p; }
+function playerId() { let p = store.get("tp2:pid"); if (!p) { p = Math.random().toString(36).slice(2, 10); store.set("tp2:pid", p); } return p; }
 function track(type, data = {}) {
   const ev = { t: Date.now(), pid: playerId(), type, ...data };
   if (user) ev.uid = user.uid;
-  const a = store.get("tp1:events", []); a.push(ev); if (a.length > 5000) a.splice(0, a.length - 5000); store.set("tp1:events", a);
+  const a = store.get("tp2:events", []); a.push(ev); if (a.length > 5000) a.splice(0, a.length - 5000); store.set("tp2:events", a);
   if (FB) FB.db.collection("events").add(ev).catch(() => {});
 }
 
@@ -194,9 +208,9 @@ const isOwner = () => !!(user && (window.OWNER_UIDS || []).includes(user.uid));
 
 // Daily results live in one map, "mode:day" -> result. Stats are worked out from it,
 // so merging this device with an account is just merging two maps.
-function savedResults() { return store.get("tp1:history", {}); }
+function savedResults() { return store.get("tp2:history", {}); }
 function recordResult(key, res) {
-  const h = savedResults(); if (h[key]) return; h[key] = res; store.set("tp1:history", h);
+  const h = savedResults(); if (h[key]) return; h[key] = res; store.set("tp2:history", h);
   if (FB && user) FB.db.collection("users").doc(user.uid).set({ history: { [key]: res } }, { merge: true }).catch(() => {});
 }
 function computeStats(mk) {
@@ -212,7 +226,7 @@ async function syncProfile() {
   const snap = await ref.get();
   const remote = snap.exists ? snap.data() : {};
   const merged = Object.assign({}, savedResults(), remote.history || {});
-  store.set("tp1:history", merged);
+  store.set("tp2:history", merged);
   const username = remote.username || pendingUsername || (user.displayName || "player").split(" ")[0];
   profile = { username };
   await ref.set({ username, history: merged, updated: Date.now() }, { merge: true });
@@ -303,7 +317,7 @@ function openAuth(mode) {
 }
 
 /* ---------- game state ---------- */
-let modeKey = store.get("tp1:mode", "countries");
+let modeKey = store.get("tp2:mode", "countries");
 if (!MODES[modeKey]) modeKey = "countries";
 let S = null;
 let view = "game";
@@ -330,11 +344,11 @@ function newState(practice) {
     myLie: 0, aiLie: 0, mm: {}, aiGuessed: [], crossed: [], flash: "", cur: null, win: null, counted: false,
   };
 }
-function gameKey() { return `tp1:game:${modeKey}:${dateKey()}`; }
+function gameKey() { return `tp2:game:${modeKey}:d${dayNumber()}`; }
 function save() { if (S && !S.practice) store.set(gameKey(), S); }
 function loadDaily() {
   const g = store.get(gameKey());
-  S = g && g.v === 1 && g.date === dateKey() ? g : newState(false);
+  S = g && g.v === 1 && g.day === dayNumber() ? g : newState(false);
   if (S.phase === "think") setTimeout(aiAct, 400);
 }
 
@@ -396,39 +410,24 @@ function setupHTML() {
 function scoreHTML() {
   const over = S.phase === "over";
   return `<div class="score">
-    <div class="side"><span class="tag t-you">You</span><span class="n">${S.yt}</span> <span class="muted">/ ${MAX_TURNS} turns</span>
+    <div class="side"><span class="tag t-you">You</span><span class="n">${S.yt}</span> <span class="muted">turns</span>
       <p class="muted">Your lie: ${S.myLie ? `used on the AI's Q${S.myLie}` : "still available"}</p></div>
-    <div class="side"><span class="tag t-ai">AI</span><span class="n">${S.at}</span> <span class="muted">/ ${MAX_TURNS} turns</span>
+    <div class="side"><span class="tag t-ai">AI</span><span class="n">${S.at}</span> <span class="muted">turns</span>
       <p class="muted">AI's lie: ${over ? (S.aiLie ? `used on your Q${S.aiLie}` : "never used") : "hidden until the end"}</p></div>
   </div>`;
 }
 
-let activeGroup = "All";
 function yourTurnHTML() {
   const m = M();
-  const groups = ["All", ...m.groups];
-  const qs = m.questions.map(q => {
-    const a = S.yAsked[q.k];
-    return a == null
-      ? `<button class="chip" data-q="${q.k}" data-g="${esc(q.g)}" data-s="${esc(norm(q.t))}"${q.hint ? ` title="${esc(q.hint)}"` : ""}>${esc(q.t)}</button>`
-      : `<span class="chip asked" data-g="${esc(q.g)}" data-s="${esc(norm(q.t))}">${esc(q.t)} <b>${a ? "Yes" : "No"}</b></span>`;
-  }).join("");
   return `${S.flash ? `<p class="muted" style="margin-bottom:10px">${S.flash}</p>` : ""}
-    <div class="row" style="justify-content:space-between"><span class="tag t-you">Your turn · question ${S.yt + 1}</span></div>
-    <h2 class="mt">Ask a question or make a guess</h2>
-    <div class="row mt"><div class="tabs" id="tabs">${groups.map(g => `<button data-tab="${esc(g)}" aria-pressed="${g === activeGroup}">${esc(g)}</button>`).join("")}</div></div>
-    <div class="field mt"><input type="search" id="qsearch" placeholder="Search questions" autocomplete="off"></div>
-    <div class="chips mt" id="qbank">${qs}</div>
-    <div class="mt" style="border-top:1px solid var(--line);padding-top:12px">
-      <label class="muted" for="bq">Does it border…</label>
-      <div class="field" style="margin-top:4px"><input type="text" id="bq" autocomplete="off" placeholder="${modeKey === "countries" ? "A country, like Brazil" : "A state, like Ohio"}"><button class="btn" id="bqGo">Ask</button></div>
-      <div id="bqsugg" style="margin-top:6px"></div>
-    </div>
-    <div class="mt" style="border-top:1px solid var(--line);padding-top:12px">
-      <label class="muted" for="guess">Or guess the AI's ${esc(m.noun)}. A wrong guess uses your turn.</label>
-      <div class="field" style="margin-top:4px"><input type="text" id="guess" autocomplete="off" placeholder="Your guess"><button class="btn" id="guessGo">Guess</button></div>
-      <div id="gsugg" style="margin-top:6px"></div>
-    </div>`;
+    <span class="tag t-you">Your turn · question ${S.yt + 1}</span>
+    <h2 class="mt">Ask a yes or no question</h2>
+    <form class="field mt" id="askForm" novalidate>
+      <input type="text" id="ask" autocomplete="off" maxlength="160" placeholder="Type your question" aria-label="Your question">
+      <button class="btn primary" type="submit" id="askGo">Ask</button>
+    </form>
+    <div id="askMsg" style="margin-top:8px" aria-live="polite"></div>
+    <p class="muted mt">Think you know it? Ask "Is it ___?" with the ${esc(m.noun)}'s name. A wrong guess uses your turn.</p>`;
 }
 
 function aiAsksHTML() {
@@ -463,7 +462,7 @@ function overHTML() {
   const h = S.win === "you" ? `You beat the AI in ${S.yt} turns` : S.win === "ai" ? `The AI found your ${m.noun} in ${S.at} turns` : `A draw after ${MAX_TURNS} turns each`;
   const aiL = S.aiLie ? `The AI lied on your question ${S.aiLie}.` : S.aiLieAt && S.aq < S.aiLieAt ? `The AI was saving its lie for your question ${S.aiLieAt}, but the duel ended first.` : "The AI never lied today.";
   const st = computeStats(modeKey);
-  const showPrompt = !S.practice && !user && store.get("tp1:promptDismissed") !== S.date;
+  const showPrompt = !S.practice && !user && store.get("tp2:promptDismissed") !== S.day;
   return `<span class="tag t-n">Duel over</span>
     <h1 class="mt">${h}</h1>
     <p class="mt">The AI's ${esc(m.noun)} was <b>${esc(ai.name)}</b>. ${aiL} ${S.myLie ? `You lied on its question ${S.myLie}.` : "You told the truth every time."}</p>
@@ -486,7 +485,7 @@ function logHTML() {
       txt = `Is it ${esc(M().byId[e.g].name)}?`;
       ans = e.ok ? `<span style="color:var(--ok)">Correct</span>` : `<span style="color:var(--bad)">Wrong</span>`;
     } else {
-      txt = esc(qText(e.k));
+      txt = esc(e.text || qText(e.k));
       const show = e.lie && (e.who === "ai" || S.phase === "over");
       ans = `${e.ans ? "Yes" : "No"}${show ? ` <span class="tag t-lie">${e.who === "ai" ? "you lied" : "AI lied"}</span>` : ""}`;
     }
@@ -518,7 +517,7 @@ function helpHTML() {
     <div class="row" style="justify-content:space-between"><h1>How to play</h1><button class="btn" id="back">Back to the duel</button></div>
     <p>${esc(HOW_TO_PLAY)}</p>
     <h3 class="mt">The details</h3>
-    <p>Each side gets ${MAX_TURNS} turns. On your turn, ask one question or make one guess. A wrong guess still uses the turn.</p>
+    <p>On your turn, type one yes or no question, or guess with "Is it ___?". A wrong guess still uses the turn. There is no turn limit: the duel goes on until someone guesses right.</p>
     <p>When the AI asks about your secret, a referee shows the true answer. Tell the truth, or lie once per game. You can't lie on judgement calls (they say "Ruling").</p>
     <p>The AI may also lie once on your questions, or never. It's decided each day and is the same for everyone. You find out at the end.</p>
     <p>There's one duel per mode per day, and the AI's pick is the same for everyone. Share your result without spoiling it.</p>
@@ -538,7 +537,7 @@ async function loadRemoteEvents() {
 function metricsHTML() {
   const everyone = !!(FB && isOwner());
   if (everyone && !remoteEvents) { loadRemoteEvents(); return `<section class="card"><p class="muted">Loading everyone's games…</p></section>`; }
-  const ev = everyone ? remoteEvents : store.get("tp1:events", []);
+  const ev = everyone ? remoteEvents : store.get("tp2:events", []);
   const source = everyone ? "These numbers cover every player's games."
     : FB && user ? `These numbers only cover this browser. To see everyone's games, add your user ID <code>${esc(user.uid)}</code> to OWNER_UIDS in firebase-config.js and to the database rules (SETUP.md, step 6).`
     : FB ? "These numbers only cover this browser. Log in with the owner account to see everyone's games."
@@ -573,7 +572,7 @@ function metricsHTML() {
 }
 function bindMetrics() {
   $("exportEv").onclick = () => {
-    const t = JSON.stringify(store.get("tp1:events", []));
+    const t = JSON.stringify(store.get("tp2:events", []));
     navigator.clipboard.writeText(t).then(() => $("exMsg").textContent = "Copied.").catch(() => $("exMsg").textContent = "Couldn't copy here.");
   };
 }
@@ -587,24 +586,9 @@ function bind() {
     if ($("start")) $("start").onclick = () => { S.me = S.pend; S.phase = "you"; track("start", { mode: modeKey, day: S.day, practice: S.practice, me: S.me }); save(); render(); };
   }
   if (S.phase === "you") {
-    document.querySelectorAll("#qbank [data-q]").forEach(b => b.onclick = () => youAsk(b.dataset.q));
-    const filter = () => {
-      const q = norm($("qsearch").value);
-      document.querySelectorAll("#qbank > *").forEach(el => { el.hidden = !((activeGroup === "All" || el.dataset.g === activeGroup) && (!q || el.dataset.s.includes(q))); });
-    };
-    document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => { activeGroup = b.dataset.tab; document.querySelectorAll("#tabs button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); filter(); });
-    $("qsearch").addEventListener("input", filter);
-    filter();
-    picker("bq", "bqGo", "bqsugg", id => {
-      const k = "b:" + id;
-      if (k in S.yAsked) { $("bqsugg").innerHTML = `<p class="err">You already asked that. The answer was ${S.yAsked[k] ? "yes" : "no"}.</p>`; return; }
-      youAsk(k);
-    });
-    picker("guess", "guessGo", "gsugg", id => {
-      $("gsugg").innerHTML = `<div class="pickbox row"><span>Guess <b>${esc(M().byId[id].name)}</b>?</span><button class="btn primary" id="gConfirm">Make the guess</button><button class="btn" id="gCancel">Cancel</button></div>`;
-      $("gConfirm").onclick = () => youGuess(id);
-      $("gCancel").onclick = () => { $("gsugg").innerHTML = ""; };
-    }, { free: true });
+    $("askForm").onsubmit = e => { e.preventDefault(); handleQuestion($("ask").value); };
+    $("ask").addEventListener("input", () => { if ($("askMsg").querySelector(".err")) $("askMsg").innerHTML = ""; });
+    setTimeout(() => { const i = $("ask"); if (i && window.innerWidth > 700) i.focus(); }, 0);
   }
   if (S.phase === "aiAsks") {
     $("truth").onclick = () => answer(false);
@@ -619,7 +603,7 @@ function bind() {
       });
     };
     document.querySelectorAll("[data-auth]").forEach(b => b.onclick = () => openAuth(b.dataset.auth));
-    if ($("notNow")) $("notNow").onclick = () => { store.set("tp1:promptDismissed", S.date); render(); };
+    if ($("notNow")) $("notNow").onclick = () => { store.set("tp2:promptDismissed", S.day); render(); };
     $("practice").onclick = () => { S = newState(true); render(); window.scrollTo(0, 0); };
     if ($("toDaily")) $("toDaily").onclick = () => { loadDaily(); render(); };
   }
@@ -640,18 +624,153 @@ function finish(win) {
   save(); render(); window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function youAsk(k) {
+/* ---------- understanding typed questions ---------- */
+// Common phrasings are matched here, instantly and for free. Anything else goes to the AI.
+const NEG = /\b(not|isn ?t|doesn ?t|aren ?t|don ?t|never|without|outside)\b/;
+const MULTI = /\b(or|and|but)\b/;
+const PATTERNS = {
+  countries: [
+    ["eu", /\b(european union|eu)\b/], ["r_me", /\bmiddle east/], ["r_sea", /\bsouth ?east(ern)? asia/], ["r_sas", /\bsouth(ern)? asia/],
+    ["r_cas", /\bcentral asia/], ["r_eas", /\beast(ern)? asia|\bfar east/], ["r_naf", /\bnorth(ern)? africa/], ["r_waf", /\bwest(ern)? africa/],
+    ["r_eaf", /\beast(ern)? africa/], ["r_maf", /\bcentral africa\b(?! republic)/], ["r_saf", /\bsouthern africa/], ["r_carib", /\bcaribbean/],
+    ["r_camer", /\bcentral america/], ["c_na", /\bnorth america/], ["c_sa", /\bsouth america/], ["r_nordic", /\b(nordic|scandinavia)/],
+    ["r_pac", /\bpacific island/], ["c_eu", /\beurope/], ["c_as", /\basia\b/], ["c_af", /\bafrica\b/], ["c_oc", /\b(oceania|australasia)\b/],
+    ["south", /\b(southern hemisphere|south of the equator|below the equator)\b/], ["equator", /\bequator\b/],
+    ["med", /\bmediterranean\b/], ["ll", /\b(landlocked|land locked)\b/], ["ll", /\b(coast|coastline|coastal|ocean|sea access|by the sea|on the sea)\b/, true],
+    ["island", /\b(island nation|island country|an island|on an island|made of islands)\b/],
+    ["p100", /\b(100|one hundred|a hundred) million\b/, "over"], ["p50", /\b(50|fifty) million\b/, "over"],
+    ["p1", /\b(1|one|a) million (people|person|residents|inhabitants|population|citizens)\b/, "under"], ["p100k", /\b(100 ?000|hundred thousand) (people|person|residents|inhabitants)\b/, "under"],
+    ["monarchy", /\b(monarch|monarchy|king|queen|royal|royals|emperor|sultan|kingdom)\b/], ["nato", /\bnato\b/], ["commonwealth", /\bcommonwealth\b/],
+    ["g20", /\bg ?20\b/], ["left", /\b(drive|drives|driving) on the left\b|\bleft hand (drive|traffic)\b/], ["left", /\b(drive|drives|driving) on the right\b/, true],
+    ["olympics", /\bolympics?\b(?!.*winter)/], ["worldcup", /\bworld cup\b/],
+    ["nvow", /\bvowel\b/], ["nstan", /\bstan\b/],
+  ],
+  states: [
+    ["missr", /\bmississippi river\b/], ["newEng", /\bnew england\b/], ["s_ne", /\b(the )?north ?east\b/], ["s_mw", /\bmid ?west\b/],
+    ["s_so", /\b(in the south|southern state|the south)\b/], ["s_we", /\b(in the west|western state|the west)\b/], ["carib", /\bcaribbean\b/],
+    ["atl", /\batlantic\b/], ["gulf", /\bgulf\b/], ["glakes", /\b(great lakes?|lake (erie|michigan|superior|huron|ontario))\b/], ["pac", /\bpacific (ocean|coast)\b/],
+    ["coast", /\b(coast|coastline|coastal|ocean)\b/], ["canada", /\bcanada\b/], ["mexico", /^(?!.*new mexico).*\bmexico\b/],
+    ["terr", /\bterritor(y|ies)\b/], ["st", /\b(a state|one of the (50|fifty) states|an actual state|a real state)\b/],
+    ["orig13", /\b(colony|colonies|original 13|original thirteen|thirteen colonies|13 colonies)\b/],
+    ["p10", /\b(10|ten) million\b/, "over"], ["p5", /\b(5|five) million\b/, "over"], ["p1", /\b(1|one|a) million\b/, "under"],
+    ["big", /\b100 ?000 square miles\b/], ["nNew", /\b(start|starts|begin|begins) with new\b/], ["nvow", /\bvowel\b/],
+  ],
+};
+const UNDER = /\b(less|fewer|under|below|smaller|lower)\b/, OVER = /\b(more|over|above|greater|bigger|larger|higher|at least)\b/;
+const BORDER = /\b(border|borders|bordering|neighbou?r|neighbou?rs|next to|adjacent|share a border|touches|touching|touch)\b/;
+const GUESS = /^(is it|is the (secret )?(country|state|place|answer)|is your (country|state|secret|answer)|it s|its|guess|my guess is|i guess|i think it s|could it be|is it the)\s+(.+)$/;
+
+// Checked before looking for place names, because these phrases contain one.
+const EARLY = {
+  countries: [["gtuk", /\b(bigger|larger) than (the )?(uk|united kingdom|britain|great britain)\b/], ["gtuk", /\bsmaller than (the )?(uk|united kingdom|britain|great britain)\b/, true]],
+  states: [["missr", /\bmississippi river\b/]],
+};
+const LANGS = [["l_en", "english"], ["l_es", "spanish"], ["l_fr", "french"], ["l_ar", "arabic"], ["l_pt", "portuguese"], ["l_ru", "russian"], ["l_de", "german"]];
+const LANG_CUE = /\b(speak|speaks|speaking|spoken|language|languages|official|tongue)\b/;
+// Aliases that are also everyday words, so they don't count as naming a place.
+const NOT_PLACES = new Set(["island", "congo", "america", "georgia state"]);
+
+// Every place named in the text, longest first.
+function placesIn(text) {
+  const t = " " + norm(text) + " ", found = [];
+  for (const e of M().ents) for (const n of [e.name, ...e.aliases]) {
+    const k = norm(n); if (NOT_PLACES.has(k)) continue;
+    if (k.length < 4 && n !== "UK" && n !== "USA" && n !== "DRC") continue;
+    if (t.includes(" " + k + " ")) found.push({ e, len: k.length });
+  }
+  found.sort((a, b) => b.len - a.len);
+  return [...new Map(found.map(f => [f.e.id, f.e])).values()];
+}
+function localRead(raw) {
+  const t = norm(raw);
+  const g = t.match(GUESS);
+  if (g) {
+    const rest = g[g.length - 1].replace(/^the /, "");
+    const exact = M().ents.filter(e => [e.name, ...e.aliases].some(n => !NOT_PLACES.has(norm(n)) && (norm(n) === rest || norm(n) === "the " + rest)));
+    if (exact.length) return { kind: "guess", places: exact };
+  }
+  if (NEG.test(t) || MULTI.test(t)) return null;
+  for (const [k, re, neg] of EARLY[modeKey]) if (re.test(t)) return { kind: "fact", key: k, negated: !!neg };
+  if (modeKey === "countries" && LANG_CUE.test(t)) {
+    const hits = LANGS.filter(([, w]) => new RegExp(`\\b${w}\\b`).test(t));
+    if (hits.length === 1) return { kind: "fact", key: hits[0][0], negated: false };
+  }
+  const pl = placesIn(t);
+  if (BORDER.test(t) && pl.length) return { kind: "border", places: pl.slice(0, 1) };
+  if (pl.length) return null;
+  for (const [k, re, flag] of PATTERNS[modeKey]) {
+    if (!re.test(t)) continue;
+    let neg = flag === true;
+    if (flag === "over" && UNDER.test(t)) neg = true;
+    if (flag === "under" && OVER.test(t)) neg = true;
+    return { kind: "fact", key: k, negated: neg };
+  }
+  return null;
+}
+async function aiRead(raw) {
+  if (!window.QUESTION_AI_URL) return { kind: "unavailable" };
+  const m = M();
+  const res = await fetch(window.QUESTION_AI_URL, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: raw, noun: m.noun, secret: m.byId[S.ai].name, facts: m.questions.map(q => ({ k: q.k, t: q.t, hint: q.hint || "" })) }),
+  });
+  if (!res.ok) throw new Error("reader " + res.status);
+  return res.json();
+}
+let asking = false;
+async function handleQuestion(raw) {
+  const msg = $("askMsg"), text = raw.trim();
+  if (!text) { msg.innerHTML = `<p class="err">Type a question first.</p>`; return; }
+  if (asking) return;
+  let r = localRead(text);
+  if (!r) {
+    asking = true; $("askGo").disabled = true; msg.innerHTML = `<p class="muted thinking">Reading your question</p>`;
+    try { r = await aiRead(text); } catch { r = { kind: "unavailable" }; }
+    asking = false; if ($("askGo")) $("askGo").disabled = false;
+    if (S.phase !== "you") return;
+    if (r.place) { const p = placesIn(r.place); r.places = p.length ? p : search(r.place).slice(0, 12); }
+  }
+  const say = h => { msg.innerHTML = h; };
+  const pickPlace = (places, verb, then) => {
+    if (!places || !places.length) return say(`<p class="err">I couldn't tell which ${esc(M().noun)} you mean. Try spelling it out.</p>`);
+    if (places.length === 1) return then(places[0]);
+    say(`<div class="pickbox"><p style="font-weight:600;margin-bottom:8px">Which one did you mean?</p><div class="chips">${places.map(e => `<button class="chip" data-pick="${e.id}">${esc(e.name)}</button>`).join("")}<button class="chip" data-pick="">Neither, it's a question</button></div><p class="muted" style="margin-top:8px">Choosing doesn't use a turn.</p></div>`);
+    msg.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => b.dataset.pick ? then(M().byId[b.dataset.pick]) : say(`<p class="muted">Try asking it a different way.</p>`));
+  };
+  switch (r.kind) {
+    case "guess": return pickPlace(r.places, "guess", e => youGuess(e.id, text));
+    case "border": return pickPlace(r.places, "border", e => askFact("b:" + e.id, text, !!r.negated));
+    case "fact":
+      if (!M().qByK[r.key]) return say(`<p class="err">I couldn't work that one out. Try asking it a different way.</p>`);
+      return askFact(r.key, text, !!r.negated);
+    case "open":
+      if (r.answer !== "yes" && r.answer !== "no") return say(`<p class="err">I couldn't work that one out. Try asking it a different way.</p>`);
+      return askOpen(text, r.answer === "yes");
+    case "clarify": return say(`<div class="pickbox"><p><b>Quick question back:</b> ${esc(r.message || "Can you say that more specifically?")}</p><p class="muted" style="margin-top:6px">Rephrase and ask again. This doesn't use a turn.</p></div>`);
+    case "invalid": return say(`<p class="err">${esc(r.message || "That needs a yes or no answer. Try rephrasing it.")}</p>`);
+    default: return say(`<p class="err">I couldn't understand that one. Try asking it a simpler way, like "Is it in Asia?"</p>`);
+  }
+}
+
+function askFact(k, text, negated) {
+  if (k in S.yAsked) { $("askMsg").innerHTML = `<p class="err">You already asked that. The answer was ${S.yAsked[k] !== negated ? "yes" : "no"}.</p>`; return; }
   S.yt++; S.aq++;
   const ai = M().byId[S.ai], t = truth(ai, k);
   const lie = !S.aiLie && S.aiLieAt > 0 && S.aq >= S.aiLieAt && !noteOf(ai, k);
-  const ans = lie ? !t : t;
+  const fact = lie ? !t : t;
   if (lie) S.aiLie = S.yt;
-  S.yAsked[k] = ans;
-  S.log.push({ who: "you", kind: "q", k, ans, lie, n: S.yt });
+  S.yAsked[k] = fact;
+  S.log.push({ who: "you", kind: "q", k, text, ans: negated ? !fact : fact, lie, n: S.yt });
   S.flash = "";
   toAI();
 }
-function youGuess(id) {
+function askOpen(text, ans) {
+  S.yt++; S.aq++;
+  S.log.push({ who: "you", kind: "q", k: "open", text, ans, lie: false, n: S.yt });
+  S.flash = "";
+  toAI();
+}
+function youGuess(id, text) {
   S.yt++;
   const ok = id === S.ai;
   S.log.push({ who: "you", kind: "g", g: id, ok, n: S.yt });
@@ -698,38 +817,25 @@ function answer(lie) {
   afterAI();
 }
 function afterAI() {
-  if (S.yt >= MAX_TURNS && S.at >= MAX_TURNS) return finish("draw");
   S.phase = "you"; save(); render();
 }
 
-/* ---------- countdown ---------- */
+/* ---------- countdown to the next noon-Pacific release ---------- */
 setInterval(() => {
+  if (S && !S.practice && view === "game" && S.day !== dayNumber()) { loadDaily(); render(); return; }
   const el = $("cd"); if (!el) return;
-  const now = new Date(), next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  const s = Math.max(0, Math.floor((next - now) / 1000));
+  const s = secondsToNextDuel();
   el.textContent = `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-  if (S && !S.practice && S.date !== dateKey()) { loadDaily(); render(); }
 }, 1000);
 
 /* ---------- boot ---------- */
 document.querySelectorAll(".seg button[data-mode]").forEach(b => b.onclick = () => {
-  modeKey = b.dataset.mode; store.set("tp1:mode", modeKey); activeGroup = "All";
+  modeKey = b.dataset.mode; store.set("tp2:mode", modeKey);
   if (location.hash) history.replaceState(null, "", location.pathname);
   view = "game"; loadDaily(); render();
 });
 $("helpBtn").onclick = () => { view = "help"; render(); window.scrollTo(0, 0); };
 $("acctBtn").onclick = () => openAccountMenu();
-// Results saved by the first version of the game (before accounts) carry over.
-(() => { try {
-  const h = savedResults(); let changed = false;
-  for (const mk of Object.keys(MODES)) for (const k of Object.keys(localStorage)) {
-    const m = k.match(new RegExp(`^tp1:game:${mk}:(\\d{4}-\\d{2}-\\d{2})$`));
-    if (!m) continue;
-    const g = store.get(k);
-    if (g && g.phase === "over" && !g.practice && !h[`${mk}:${g.day}`]) { h[`${mk}:${g.day}`] = { win: g.win, yt: g.yt, at: g.at, date: g.date }; changed = true; }
-  }
-  if (changed) store.set("tp1:history", h);
-} catch {} })();
 function route() { view = location.hash === "#stats" ? "stats" : "game"; render(); }
 window.addEventListener("hashchange", route);
 loadDaily();

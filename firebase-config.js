@@ -10,6 +10,10 @@ window.FIREBASE_CONFIG = {
   appId: "1:660463365315:web:5ce4c09d21c77247e44676"
 };
 
+// Address of the free Cloudflare AI that reads typed questions (see question-ai-worker.js).
+// Leave as null and the game still understands common questions on its own.
+window.QUESTION_AI_URL = null;
+
 // Firebase user IDs allowed to see everyone's stats on the Owner stats page.
 // See SETUP.md, step 6.
 window.OWNER_UIDS = ["kzeEdCTMgHNc4N0l6pIXHCgovzU2"];

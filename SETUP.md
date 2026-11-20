@@ -55,3 +55,12 @@ These values are meant to be public, so it's fine to share them.
 ## 7. When the game goes online
 
 Under **Authentication → Settings → Authorized domains**, add the game's domain. Localhost is already on the list, so testing on your computer works without this.
+
+# Switching on the AI question reader (free)
+
+The game understands common questions by itself. For everything else, it asks a free Cloudflare AI.
+
+1. In Cloudflare, go to **Compute → Workers & Pages → Create → Create Worker** (Start with Hello World). Name it `interrogate-ai` and click **Deploy**.
+2. Click **Edit code**. Delete everything, paste in all of `question-ai-worker.js`, and click **Deploy**.
+3. Go back to the worker, open **Settings → Bindings → Add → Workers AI**. Variable name: `AI`. Save.
+4. Copy the worker's address (it ends in `.workers.dev`) and send it to Claude, or put it in `firebase-config.js` as `window.QUESTION_AI_URL = "https://...workers.dev";`
