@@ -106,6 +106,10 @@ details summary { cursor: pointer; }
 .thinking::after { content: "…"; animation: dots 1.2s steps(4) infinite; display: inline-block; width: 1.2em; overflow: hidden; vertical-align: bottom; }
 @keyframes dots { from { width: 0; } to { width: 1.2em; } }
 @media (prefers-reduced-motion: reduce) { .thinking::after { animation: none; } }
+.answer { border-bottom: 1px dashed var(--line); padding-bottom: 14px; margin-bottom: 14px; }
+.verdict { font: 600 22px/1.2 var(--display); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 6px; }
+.verdict b { display: inline-block; font-size: 34px; padding: 0 10px; margin-left: 4px; border: 3px solid currentColor; border-radius: 4px; transform: rotate(-3deg); }
+.v-yes { color: var(--ok); } .v-no { color: var(--bad); }
 .coinrow { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .coin { width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center; font: 700 18px var(--display); letter-spacing: 0.06em;
   color: #3b2a05; background: radial-gradient(circle at 35% 30%, #ffe08a, #d9a524 60%, #a87a10); border: 3px solid #8a6208; box-shadow: inset 0 0 0 3px rgba(255, 240, 190, 0.5); }
@@ -470,10 +474,19 @@ function yourTurnHTML() {
     <p class="muted mt">Think you know it? Ask "Is it ___?" with the ${esc(m.noun)}'s name. A wrong guess uses your turn.</p>`;
 }
 
+// The answer to the question you just asked, shown big before the AI takes its turn.
+function lastAnswerHTML() {
+  const e = [...S.log].reverse().find(x => x.who === "you");
+  if (!e) return "";
+  const q = e.kind === "g" ? `Is it ${M().byId[e.g].name}?` : (e.text || qText(e.k));
+  const a = e.kind === "g" ? "WRONG" : e.ans ? "YES" : "NO";
+  return `<div class="answer mt0"><p class="muted">You asked: <span style="font-family:var(--mono);color:var(--ink)">"${esc(q)}"</span></p>
+    <p class="verdict ${a === "YES" ? "v-yes" : "v-no"}">The AI says: <b>${a}</b></p></div>`;
+}
 function aiAsksHTML() {
   const me = M().byId[S.me], k = S.cur, t = truth(me, k), n = noteOf(me, k);
   const canLie = !S.myLie && !n;
-  return `<span class="tag t-ai">AI's turn · question ${S.at}</span>
+  return `${lastAnswerHTML()}<span class="tag t-ai">AI's turn · question ${S.at}</span>
     <p class="bigq mt">"${esc(qText(k))}"</p>
     <p class="muted mt">The referee knows your secret is ${esc(me.name)}. The true answer is <b style="color:var(--ink)">${t ? "yes" : "no"}</b>.${n ? ` Ruling: ${esc(n)}` : ""}</p>
     <div class="row mt">
@@ -541,7 +554,7 @@ function padHTML() {
 function playHTML() {
   let action;
   if (S.phase === "you") action = yourTurnHTML();
-  else if (S.phase === "think") action = `<span class="tag t-ai">AI's turn</span><p class="mt thinking">The AI is thinking</p>`;
+  else if (S.phase === "think") action = `${lastAnswerHTML()}<span class="tag t-ai">AI's turn</span><p class="mt thinking">The AI is thinking</p>`;
   else if (S.phase === "aiAsks") action = aiAsksHTML();
   else action = overHTML();
   return `${scoreHTML()}
