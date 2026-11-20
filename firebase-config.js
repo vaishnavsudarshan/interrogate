@@ -12,7 +12,7 @@ window.FIREBASE_CONFIG = {
 
 // Address of the free Cloudflare AI that reads typed questions (see question-ai-worker.js).
 // Leave as null and the game still understands common questions on its own.
-window.QUESTION_AI_URL = null;
+window.QUESTION_AI_URL = "https://interrogate-ai.vaishnavs2811.workers.dev/";
 
 // Share of games counted in the owner stats (1 = every game). If the game goes huge and
 // Firebase's free daily writes run out, lower this (e.g. 0.05 = 1 in 20). The stats page
