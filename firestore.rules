@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Put your own user ID here (SETUP.md, step 6). Only these accounts can read everyone's stats.
+    function isOwner() {
+      return request.auth != null && request.auth.uid in ['kzeEdCTMgHNc4N0l6pIXHCgovzU2'];
+    }
+
+    // Each player's saved results. Only that player can read or change them.
+    match /users/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Taken usernames. Anyone can check a name; you can only claim one for yourself, once.
+    match /usernames/{name} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid
+        && name.matches('^[a-z0-9_]{3,20}$');
+    }
+
+    // Game events for the owner stats page. Anyone can add one; only the owner can read them.
+    match /events/{id} {
+      allow create: if request.resource.data.keys().hasOnly(
+          ['t', 'pid', 'uid', 'type', 'mode', 'day', 'practice', 'win', 'yt', 'at', 'myLie', 'aiLie', 'me', 'ai', 'asked'])
+        && request.resource.data.type in ['start', 'end', 'share'];
+      allow read: if isOwner();
+    }
+  }
+}

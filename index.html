@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Interrogation Room</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&family=Special+Elite&display=swap" rel="stylesheet">
+<style>
+/* Layout: one narrow column in a dark room under a single overhead lamp.
+   Lamp amber = you, steel blue = the AI, stamp red = lies. Your turn sits on a manila case file.
+   One committed look (always dark), so there are no light-theme blocks. */
+:root {
+  --bg: #0b0d10; --surface: #14181d; --chip: #1c2128; --ink: #ece6d8; --muted: #9a9585; --line: #2a3038;
+  --you: #f2c14e; --you-bg: rgba(242, 193, 78, 0.14); --ai: #8fc0e6; --ai-bg: rgba(143, 192, 230, 0.13);
+  --lie: #e0384f; --lie-bg: rgba(224, 56, 79, 0.12);
+  --ok: #7fcf7a; --bad: #ff6b6b; --btn: #f2c14e; --btn-ink: #14110a;
+  --lamp: rgba(242, 193, 78, 0.20);
+  --display: "Oswald", "Arial Narrow", Impact, sans-serif;
+  --body: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "Special Elite", "Courier New", Courier, monospace;
+  color-scheme: dark;
+}
+/* The case file: manila paper with dark ink. Everything inside re-reads these tokens. */
+.paper {
+  --surface: #e8dcbf; --chip: #ddd0ae; --ink: #1d1913; --muted: #5f5644; --line: #c4b48d;
+  --you: #8a5300; --you-bg: rgba(138, 83, 0, 0.12); --ai: #1f4f7a; --ai-bg: rgba(31, 79, 122, 0.12);
+  --lie: #b3132b; --lie-bg: rgba(179, 19, 43, 0.08);
+  --ok: #2f6b2a; --bad: #a3141f; --btn: #1d1913; --btn-ink: #e8dcbf;
+  color: var(--ink); color-scheme: light;
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.9);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  color: var(--ink); font: 15px/1.55 var(--body); min-height: 100vh;
+  background: radial-gradient(ellipse 70% 420px at 50% -60px, var(--lamp), transparent 70%), var(--bg);
+  background-repeat: no-repeat; background-color: var(--bg);
+}
+.wrap { max-width: 760px; margin: 0 auto; padding-block: 12px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 6px 0 14px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.logo { font: 700 27px/1 var(--display); letter-spacing: 0.04em; text-transform: uppercase; margin: 0; }
+.logo span { color: var(--you); text-shadow: 0 0 18px rgba(242, 193, 78, 0.45); }
+.hbtns { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.seg { display: inline-flex; background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.seg button { border: 0; background: transparent; color: var(--muted); font: 500 13px var(--body); padding: 6px 12px; border-radius: 999px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
+.icon { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 999px; padding: 6px 12px; font: 500 13px var(--body); cursor: pointer; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 18px 20px; margin-bottom: 14px; }
+.card.paper { border-radius: 3px; }
+h1, h2, h3 { font-family: var(--display); letter-spacing: 0.02em; text-transform: uppercase; text-wrap: balance; margin: 0; }
+h1 { font-size: 30px; line-height: 1.1; font-weight: 700; }
+h2 { font-size: 21px; line-height: 1.2; font-weight: 700; }
+h3 { font-size: 16px; font-weight: 700; }
+p { margin: 0; }
+.eyebrow { font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.muted { color: var(--muted); font-size: 13.5px; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tag { display: inline-block; font: 500 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+.t-you { background: var(--you-bg); color: var(--you); }
+.t-ai { background: var(--ai-bg); color: var(--ai); }
+.t-lie { background: transparent; color: var(--lie); border: 2px solid var(--lie); padding: 1px 7px; transform: rotate(-5deg); font-weight: 700; letter-spacing: 0.12em; }
+.t-n { background: var(--chip); color: var(--muted); }
+button { font: inherit; }
+.btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 14px; border-radius: 10px; cursor: pointer; font-size: 14px; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--btn); color: var(--btn-ink); border-color: var(--btn); font-weight: 600; }
+.btn.lie { background: var(--lie-bg); color: var(--lie); border-color: var(--lie); font-weight: 600; }
+.btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--you); outline-offset: 2px; }
+input[type="text"], input[type="search"] { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; min-width: 0; flex: 1; }
+.field { display: flex; gap: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--line); background: var(--chip); color: var(--ink); padding: 5px 11px; border-radius: 999px; cursor: pointer; font-size: 13.5px; }
+.chip:hover { border-color: var(--you); }
+.chip.asked { opacity: 0.55; cursor: default; }
+.chip.asked b { font-weight: 600; }
+.pickbox { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--chip); }
+.err { color: var(--bad); font-size: 13px; }
+.score { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.side { border-radius: 12px; padding: 10px 14px; border: 1px solid var(--line); background: var(--surface); }
+.side .n { font: 700 26px/1 var(--display); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.bigq { font: 26px/1.3 var(--mono); }
+.log .entry > span:nth-child(2) { font-family: var(--mono); font-size: 15px; }
+.log .entry { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.log .entry:first-of-type { border-top: 0; }
+.ans { font-weight: 600; white-space: nowrap; text-align: right; }
+.pad { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 4px; margin-top: 10px; }
+.pad button { text-align: left; border: 0; background: var(--chip); color: var(--ink); font-size: 12.5px; padding: 4px 8px; border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pad button.out { background: transparent; color: var(--muted); text-decoration: line-through; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tabs button { border: 0; background: transparent; color: var(--muted); padding: 4px 10px; border-radius: 999px; cursor: pointer; font-size: 13px; }
+.tabs button[aria-pressed="true"] { background: var(--you-bg); color: var(--you); font-weight: 600; }
+.sharebox { background: var(--chip); border-radius: 10px; padding: 12px 14px; font: 13.5px/1.6 var(--mono); white-space: pre-wrap; }
+.stats4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; }
+.stats4 b { display: block; font: 700 24px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.stats4 span { font-size: 12px; color: var(--muted); }
+.facts { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+.facts td { padding: 5px 0; border-top: 1px solid var(--line); vertical-align: top; }
+.facts td:last-child { text-align: right; font-weight: 600; padding-left: 10px; white-space: nowrap; }
+.tablewrap { overflow-x: auto; }
+.mt { margin-top: 12px; }
+details summary { cursor: pointer; }
+.thinking::after { content: "…"; animation: dots 1.2s steps(4) infinite; display: inline-block; width: 1.2em; overflow: hidden; vertical-align: bottom; }
+@keyframes dots { from { width: 0; } to { width: 1.2em; } }
+@media (prefers-reduced-motion: reduce) { .thinking::after { animation: none; } }
+.overlay { position: fixed; inset: 0; background: rgba(10, 16, 22, 0.55); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; z-index: 20; padding: max(40px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 40px max(16px, env(safe-area-inset-left, 0px)); }
+.modal { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 22px; width: 100%; max-width: 400px; }
+.modal label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+.modal input { width: 100%; }
+.gbtn { width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 14px 0 4px; }
+.or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.prompt { border: 1px solid var(--you); background: var(--you-bg); border-radius: 12px; padding: 14px 16px; }
+.prompt p { color: var(--ink); }
+@media (max-width: 520px) { h1 { font-size: 25px; } .log .entry { grid-template-columns: 78px minmax(0, 1fr) auto; } .stats4 b { font-size: 20px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="logo">Interrogation <span>Room</span></p>
+    <div class="hbtns">
+      <div class="seg" role="group" aria-label="Game mode">
+        <button id="m-countries" data-mode="countries">Countries</button>
+        <button id="m-states" data-mode="states">US states</button>
+        <button id="helpBtn">How to play</button>
+      </div>
+      <button class="icon" id="acctBtn">Log in</button>
+    </div>
+  </header>
+  <main id="main"><div class="card"><p class="muted">Loading…</p></div></main>
+  <footer class="muted" style="margin-top:24px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap">
+    <span>A new duel every day at midnight. Country data from <a href="https://github.com/mledoze/countries" style="color:var(--muted)">mledoze/countries</a> (ODbL).</span>
+    <a href="#stats" style="color:var(--muted)">Owner stats</a>
+  </footer>
+</div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="countries-raw.js"></script>
+<script src="data.js"></script>
+<script>
+"use strict";
+const MAX_TURNS = 20;
+const HOW_TO_PLAY = "In this daily game, you and an AI will each pick a country (or state or language, depending on which mode you play). You will take turns asking each other yes/no questions, and your goal is to try to guess the AI's country before it guesses yours. The twist? You can both lie at most once!";
+const MODES = { countries: buildCountries(), states: buildStates() };
+for (const m of Object.values(MODES)) {
+  m.byId = Object.fromEntries(m.ents.map(e => [e.id, e]));
+  m.qByK = Object.fromEntries(m.questions.map(q => [q.k, q]));
+  m.groups = [...new Set(m.questions.map(q => q.g))];
+  m.sorted = [...m.ents].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/* ---------- utilities ---------- */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed) { let a = seed >>> 0; return () => { a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+const EPOCH = new Date(2026, 10, 19);
+function dateKey(d = new Date()) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+function dayNumber(d = new Date()) { const a = new Date(d.getFullYear(), d.getMonth(), d.getDate()); return Math.max(1, Math.round((a - EPOCH) / 864e5) + 1); }
+const norm = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+
+/* ---------- metrics (this device until the game is online) ---------- */
+function playerId() { let p = store.get("tp1:pid"); if (!p) { p = Math.random().toString(36).slice(2, 10); store.set("tp1:pid", p); } return p; }
+function track(type, data = {}) {
+  const ev = { t: Date.now(), pid: playerId(), type, ...data };
+  if (user) ev.uid = user.uid;
+  const a = store.get("tp1:events", []); a.push(ev); if (a.length > 5000) a.splice(0, a.length - 5000); store.set("tp1:events", a);
+  if (FB) FB.db.collection("events").add(ev).catch(() => {});
+}
+
+/* ---------- accounts (Firebase) ---------- */
+const FB = (() => {
+  try {
+    if (!window.FIREBASE_CONFIG || !window.firebase) return null;
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+    return { auth: firebase.auth(), db: firebase.firestore() };
+  } catch (e) { console.warn("Firebase didn't start:", e); return null; }
+})();
+let user = null, profile = null;
+// Hidden from players; usernames are stored as fake emails. Don't change it once accounts exist.
+const EMAIL_DOMAIN = "players.twentypaces.app";
+const isOwner = () => !!(user && (window.OWNER_UIDS || []).includes(user.uid));
+
+// Daily results live in one map, "mode:day" -> result. Stats are worked out from it,
+// so merging this device with an account is just merging two maps.
+function savedResults() { return store.get("tp1:history", {}); }
+function recordResult(key, res) {
+  const h = savedResults(); if (h[key]) return; h[key] = res; store.set("tp1:history", h);
+  if (FB && user) FB.db.collection("users").doc(user.uid).set({ history: { [key]: res } }, { merge: true }).catch(() => {});
+}
+function computeStats(mk) {
+  const days = Object.entries(savedResults()).filter(([k]) => k.startsWith(mk + ":")).map(([k, r]) => ({ day: +k.split(":")[1], win: r.win === "you" })).sort((a, b) => a.day - b.day);
+  let cur = 0, max = 0, prev = null;
+  for (const d of days) { cur = d.win ? (prev && prev.win && prev.day === d.day - 1 ? cur + 1 : 1) : 0; max = Math.max(max, cur); prev = d; }
+  const last = days[days.length - 1];
+  if (!last || last.day < dayNumber() - 1) cur = 0;
+  return { played: days.length, wins: days.filter(d => d.win).length, cur, max };
+}
+async function syncProfile() {
+  const ref = FB.db.collection("users").doc(user.uid);
+  const snap = await ref.get();
+  const remote = snap.exists ? snap.data() : {};
+  const merged = Object.assign({}, savedResults(), remote.history || {});
+  store.set("tp1:history", merged);
+  const username = remote.username || pendingUsername || (user.displayName || "player").split(" ")[0];
+  profile = { username };
+  await ref.set({ username, history: merged, updated: Date.now() }, { merge: true });
+}
+let pendingUsername = null;
+if (FB) FB.auth.onAuthStateChanged(async u => {
+  user = u; profile = null;
+  if (u) { try { await syncProfile(); } catch (e) { console.warn(e); } }
+  renderAccount(); if (S) render();
+});
+
+function renderAccount() {
+  const b = $("acctBtn");
+  b.textContent = user ? (profile ? profile.username : "Account") : "Log in";
+}
+function closeModal() { const o = $("overlay"); if (o) o.remove(); }
+function showModal(html) {
+  closeModal();
+  const o = document.createElement("div"); o.className = "overlay"; o.id = "overlay";
+  o.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
+  o.addEventListener("click", e => { if (e.target === o) closeModal(); });
+  document.body.appendChild(o);
+  document.addEventListener("keydown", function esc(e) { if (e.key === "Escape") { closeModal(); document.removeEventListener("keydown", esc); } });
+  return o;
+}
+function openAccountMenu() {
+  if (!user) return openAuth("login");
+  const st = (mk) => computeStats(mk);
+  const o = showModal(`<h2>${esc(profile ? profile.username : "Your account")}</h2>
+    <p class="muted" style="margin-top:4px">Your daily results are saved to this account.</p>
+    ${Object.values(MODES).map(m => { const s = st(m.key); return `<p class="mt"><b>${esc(m.label)}</b>: ${s.played} played, ${s.wins} won, best streak ${s.max}</p>`; }).join("")}
+    <div class="row mt"><button class="btn" id="logout">Log out</button><button class="btn" id="mClose">Close</button></div>`);
+  o.querySelector("#logout").onclick = async () => { await FB.auth.signOut(); closeModal(); };
+  o.querySelector("#mClose").onclick = closeModal;
+}
+function openAuth(mode) {
+  if (!FB) {
+    const o = showModal(`<h2>Accounts are coming soon</h2><p class="muted mt">Accounts switch on once the game is connected to its database. Your results are still saved in this browser.</p><div class="row mt"><button class="btn primary" id="mClose">OK</button></div>`);
+    o.querySelector("#mClose").onclick = closeModal; return;
+  }
+  const signup = mode === "signup";
+  const o = showModal(`<div class="row" style="justify-content:space-between"><h2>${signup ? "Create an account" : "Log in"}</h2><button class="btn" id="mClose" aria-label="Close">✕</button></div>
+    <p class="muted" style="margin-top:4px">Save your streak and see your results on any device.</p>
+    <button class="btn gbtn mt" id="gSign"><svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>Continue with Google</button>
+    <div class="or">or use a username</div>
+    <form id="authForm" novalidate>
+      <label for="aUser">Username</label><input type="text" id="aUser" autocomplete="username" placeholder="mapmaster" maxlength="20">
+      <label for="aPass">Password</label><input type="password" id="aPass" autocomplete="${signup ? "new-password" : "current-password"}" placeholder="At least 6 characters" style="font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:8px 12px">
+      <p class="err" id="aErr" style="margin-top:8px" aria-live="polite"></p>
+      <button class="btn primary mt" style="width:100%" type="submit">${signup ? "Create account" : "Log in"}</button>
+    </form>
+    <p class="muted mt" style="text-align:center">${signup ? "Already have an account?" : "New here?"} <button class="btn" id="aSwitch" style="border:0;background:transparent;color:var(--you);padding:0">${signup ? "Log in" : "Create an account"}</button></p>`);
+  const err = m => { o.querySelector("#aErr").textContent = m; };
+  o.querySelector("#mClose").onclick = closeModal;
+  o.querySelector("#aSwitch").onclick = () => openAuth(signup ? "login" : "signup");
+  o.querySelector("#gSign").onclick = async () => {
+    try { await FB.auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); closeModal(); }
+    catch (e) { if (e.code !== "auth/popup-closed-by-user") err("Google sign-in didn't work. Try again, or use a username."); }
+  };
+  o.querySelector("#authForm").onsubmit = async e => {
+    e.preventDefault(); err("");
+    const name = o.querySelector("#aUser").value.trim().toLowerCase(), pass = o.querySelector("#aPass").value;
+    if (!/^[a-z0-9_]{3,20}$/.test(name)) return err("Usernames are 3 to 20 letters, numbers or underscores.");
+    if (pass.length < 6) return err("Passwords need at least 6 characters.");
+    const email = `${name}@${EMAIL_DOMAIN}`;
+    try {
+      if (signup) {
+        const taken = await FB.db.collection("usernames").doc(name).get();
+        if (taken.exists) return err("That username's taken. Try another.");
+        pendingUsername = name;
+        const cred = await FB.auth.createUserWithEmailAndPassword(email, pass);
+        await FB.db.collection("usernames").doc(name).set({ uid: cred.user.uid });
+        await FB.db.collection("users").doc(cred.user.uid).set({ username: name }, { merge: true });
+        profile = { username: name }; renderAccount();
+      } else {
+        await FB.auth.signInWithEmailAndPassword(email, pass);
+      }
+      closeModal();
+    } catch (ex) {
+      const c = ex.code || "";
+      err(c.includes("email-already-in-use") ? "That username's taken. Try another."
+        : c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found") ? "That username and password don't match."
+        : c.includes("too-many-requests") ? "Too many tries. Wait a minute and try again."
+        : "Something went wrong. Check your connection and try again.");
+    }
+  };
+  setTimeout(() => o.querySelector("#aUser").focus(), 0);
+}
+
+/* ---------- game state ---------- */
+let modeKey = store.get("tp1:mode", "countries");
+if (!MODES[modeKey]) modeKey = "countries";
+let S = null;
+let view = "game";
+const M = () => MODES[modeKey];
+const qText = k => k.startsWith("b:") ? M().borderText(M().byId[k.slice(2)].name) : M().qByK[k].t;
+const truth = (e, k) => k.startsWith("b:") ? e.nb.includes(k.slice(2)) : e.f.has(k);
+const noteOf = (e, k) => e.notes[k];
+
+function dailyAnswer(mk, day) {
+  const ids = MODES[mk].ents.map(e => e.id).sort();
+  const r = rng(hash("order:" + mk));
+  for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+  return ids[(day - 1) % ids.length];
+}
+function newState(practice) {
+  const day = dayNumber(), date = dateKey();
+  const seed = practice ? hash("p:" + Math.random()) : hash(`day:${modeKey}:${day}`);
+  const r = rng(seed ^ 0x51ed);
+  const ai = practice ? M().ents[Math.floor(r() * M().ents.length)].id : dailyAnswer(modeKey, day);
+  const roll = r(), at = r();
+  return {
+    v: 1, mode: modeKey, day, date, practice, seed, ai, aiLieAt: roll < 0.3 ? 0 : 2 + Math.floor(at * 6),
+    phase: "setup", pend: null, me: null, yt: 0, at: 0, aq: 0, log: [], yAsked: {}, aAsked: [],
+    myLie: 0, aiLie: 0, mm: {}, aiGuessed: [], crossed: [], flash: "", cur: null, win: null, counted: false,
+  };
+}
+function gameKey() { return `tp1:game:${modeKey}:${dateKey()}`; }
+function save() { if (S && !S.practice) store.set(gameKey(), S); }
+function loadDaily() {
+  const g = store.get(gameKey());
+  S = g && g.v === 1 && g.date === dateKey() ? g : newState(false);
+  if (S.phase === "think") setTimeout(aiAct, 400);
+}
+
+/* ---------- name search with "which one did you mean?" ---------- */
+function search(q) {
+  const n = norm(q); if (!n) return [];
+  return M().sorted.filter(e => [e.name, ...e.aliases].some(s => { const w = norm(s).split(" "); return w.some((_, i) => w.slice(i).join(" ").startsWith(n)); }));
+}
+function picker(inputId, btnId, boxId, onPick, opts = {}) {
+  const I = $(inputId), B = $(btnId), X = $(boxId); if (!I) return;
+  const chip = e => `<button class="chip" data-pick="${e.id}">${esc(e.name)}</button>`;
+  I.addEventListener("input", () => {
+    const v = I.value.trim(); const m = search(v).slice(0, 8);
+    X.innerHTML = v.length >= 2 && m.length ? `<div class="chips">${m.map(chip).join("")}</div>` : "";
+  });
+  const go = () => {
+    const v = I.value.trim();
+    if (!v) { X.innerHTML = `<p class="err">Type a name first.</p>`; return; }
+    const m = search(v);
+    if (m.length === 1) return onPick(m[0].id);
+    if (!m.length) { X.innerHTML = `<p class="err">"${esc(v)}" isn't on the list. Try another spelling.</p>`; return; }
+    X.innerHTML = `<div class="pickbox"><p style="font-weight:600;margin-bottom:8px">Which ${esc(v.charAt(0).toUpperCase() + v.slice(1))} did you mean?</p><div class="chips">${m.slice(0, 14).map(chip).join("")}</div>${opts.free ? `<p class="muted" style="margin-top:8px">Choosing doesn't use a turn.</p>` : ""}</div>`;
+  };
+  B.addEventListener("click", go);
+  I.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+  X.addEventListener("click", e => { const b = e.target.closest("[data-pick]"); if (b) onPick(b.dataset.pick); });
+}
+
+/* ---------- views ---------- */
+function render() {
+  document.querySelectorAll(".seg button[data-mode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === modeKey && view === "game")));
+  $("helpBtn").setAttribute("aria-pressed", String(view === "help"));
+  const main = $("main");
+  if (view === "help") { main.innerHTML = helpHTML(); $("back").onclick = () => { view = "game"; render(); }; return; }
+  if (view === "stats") { main.innerHTML = metricsHTML(); bindMetrics(); return; }
+  main.innerHTML = S.phase === "setup" ? setupHTML() : playHTML();
+  bind();
+}
+
+function setupHTML() {
+  const m = M();
+  return `<section class="card paper stack">
+    <p class="eyebrow">${S.practice ? "Practice round" : `Daily duel #${S.day}`} · ${esc(m.label)}</p>
+    <h1>Pick your secret ${esc(m.noun)}</h1>
+    <p class="muted">The AI has already picked one. Today it's the same one for everyone. Take turns asking yes or no questions. The first to name the other's ${esc(m.noun)} wins.</p>
+    <label class="muted" for="pick" style="margin-top:6px">Your secret ${esc(m.noun)}</label>
+    <div class="field"><input type="text" id="pick" autocomplete="off" placeholder="Enter the ${esc(m.noun)} you want here"><button class="btn" id="pickGo">Choose</button></div>
+    <div id="psugg"></div>
+    <div class="row">${S.pend ? `<span>Your secret: <b>${esc(m.byId[S.pend].name)}</b></span><button class="btn primary" id="start">Start the duel</button><button class="btn" id="clear">Change</button>` : `<button class="btn" id="rand">Pick one at random</button>`}</div>
+  </section>
+  <section class="card stack">
+    <h3>How a duel works</h3>
+    <p class="muted">You go first. On your turn, ask a question or guess. A wrong guess uses your turn.</p>
+    <p class="muted">When the AI asks about your ${esc(m.noun)}, a referee shows you the true answer, so you don't need to know it yourself. You can tell the truth, or lie once per game.</p>
+    <p class="muted">The AI may also lie once, or not at all. You find out at the end.</p>
+  </section>`;
+}
+
+function scoreHTML() {
+  const over = S.phase === "over";
+  return `<div class="score">
+    <div class="side"><span class="tag t-you">You</span><span class="n">${S.yt}</span> <span class="muted">/ ${MAX_TURNS} turns</span>
+      <p class="muted">Your lie: ${S.myLie ? `used on the AI's Q${S.myLie}` : "still available"}</p></div>
+    <div class="side"><span class="tag t-ai">AI</span><span class="n">${S.at}</span> <span class="muted">/ ${MAX_TURNS} turns</span>
+      <p class="muted">AI's lie: ${over ? (S.aiLie ? `used on your Q${S.aiLie}` : "never used") : "hidden until the end"}</p></div>
+  </div>`;
+}
+
+let activeGroup = "All";
+function yourTurnHTML() {
+  const m = M();
+  const groups = ["All", ...m.groups];
+  const qs = m.questions.map(q => {
+    const a = S.yAsked[q.k];
+    return a == null
+      ? `<button class="chip" data-q="${q.k}" data-g="${esc(q.g)}" data-s="${esc(norm(q.t))}"${q.hint ? ` title="${esc(q.hint)}"` : ""}>${esc(q.t)}</button>`
+      : `<span class="chip asked" data-g="${esc(q.g)}" data-s="${esc(norm(q.t))}">${esc(q.t)} <b>${a ? "Yes" : "No"}</b></span>`;
+  }).join("");
+  return `${S.flash ? `<p class="muted" style="margin-bottom:10px">${S.flash}</p>` : ""}
+    <div class="row" style="justify-content:space-between"><span class="tag t-you">Your turn · question ${S.yt + 1}</span></div>
+    <h2 class="mt">Ask a question or make a guess</h2>
+    <div class="row mt"><div class="tabs" id="tabs">${groups.map(g => `<button data-tab="${esc(g)}" aria-pressed="${g === activeGroup}">${esc(g)}</button>`).join("")}</div></div>
+    <div class="field mt"><input type="search" id="qsearch" placeholder="Search questions" autocomplete="off"></div>
+    <div class="chips mt" id="qbank">${qs}</div>
+    <div class="mt" style="border-top:1px solid var(--line);padding-top:12px">
+      <label class="muted" for="bq">Does it border…</label>
+      <div class="field" style="margin-top:4px"><input type="text" id="bq" autocomplete="off" placeholder="${modeKey === "countries" ? "A country, like Brazil" : "A state, like Ohio"}"><button class="btn" id="bqGo">Ask</button></div>
+      <div id="bqsugg" style="margin-top:6px"></div>
+    </div>
+    <div class="mt" style="border-top:1px solid var(--line);padding-top:12px">
+      <label class="muted" for="guess">Or guess the AI's ${esc(m.noun)}. A wrong guess uses your turn.</label>
+      <div class="field" style="margin-top:4px"><input type="text" id="guess" autocomplete="off" placeholder="Your guess"><button class="btn" id="guessGo">Guess</button></div>
+      <div id="gsugg" style="margin-top:6px"></div>
+    </div>`;
+}
+
+function aiAsksHTML() {
+  const me = M().byId[S.me], k = S.cur, t = truth(me, k), n = noteOf(me, k);
+  const canLie = !S.myLie && !n;
+  return `<span class="tag t-ai">AI's turn · question ${S.at}</span>
+    <p class="bigq mt">"${esc(qText(k))}"</p>
+    <p class="muted mt">The referee knows your secret is ${esc(me.name)}. The true answer is <b style="color:var(--ink)">${t ? "yes" : "no"}</b>.${n ? ` Ruling: ${esc(n)}` : ""}</p>
+    <div class="row mt">
+      <button class="btn primary" id="truth">Tell the truth: ${t ? "yes" : "no"}</button>
+      <button class="btn ${canLie ? "lie" : ""}" id="lie" ${canLie ? "" : "disabled"}>Lie: ${t ? "no" : "yes"}</button>
+    </div>
+    <p class="muted mt">${S.myLie ? `You used your lie on the AI's question ${S.myLie}.` : n ? "You can't lie on a judgement call." : "You get one lie per game. Once you use it, it's gone."}</p>`;
+}
+
+function shareText() {
+  const m = M();
+  const line = w => S.log.filter(e => e.who === w).map(e => e.kind === "g" ? (e.ok ? "🎯" : "❌") : (w === "you" ? "🟦" : "🟧")).join("");
+  const head = `Interrogation Room ${m.symbol} ${S.practice ? "practice" : "#" + S.day}`;
+  const res = S.win === "you" ? `Beat the AI in ${S.yt} turns ⚔️` : S.win === "ai" ? `The AI got me in ${S.at} turns` : `Draw after ${MAX_TURNS} turns`;
+  const aiL = S.aiLie ? `🤥 AI lied on Q${S.aiLie}` : S.aiLieAt && S.aq < S.aiLieAt ? "🤫 AI was saving its lie" : "😇 AI stayed honest";
+  return `${head}\n${res}\nMe ${line("you")}\nAI ${line("ai")}\n${aiL} · ${S.myLie ? "🤥 I lied once" : "😇 I stayed honest"}`;
+}
+
+function factTable(e) {
+  return `<div class="tablewrap"><table class="facts">${M().questions.map(q => `<tr><td>${esc(q.t)}${noteOf(e, q.k) ? `<br><span class="muted">${esc(noteOf(e, q.k))}</span>` : ""}</td><td>${truth(e, q.k) ? "Yes" : "No"}</td></tr>`).join("")}
+    <tr><td>Borders</td><td style="white-space:normal">${e.nb.length ? e.nb.map(id => esc(M().byId[id].name)).join(", ") : "None"}</td></tr></table></div>`;
+}
+
+function overHTML() {
+  const m = M(), ai = m.byId[S.ai];
+  const h = S.win === "you" ? `You beat the AI in ${S.yt} turns` : S.win === "ai" ? `The AI found your ${m.noun} in ${S.at} turns` : `A draw after ${MAX_TURNS} turns each`;
+  const aiL = S.aiLie ? `The AI lied on your question ${S.aiLie}.` : S.aiLieAt && S.aq < S.aiLieAt ? `The AI was saving its lie for your question ${S.aiLieAt}, but the duel ended first.` : "The AI never lied today.";
+  const st = computeStats(modeKey);
+  const showPrompt = !S.practice && !user && store.get("tp1:promptDismissed") !== S.date;
+  return `<span class="tag t-n">Duel over</span>
+    <h1 class="mt">${h}</h1>
+    <p class="mt">The AI's ${esc(m.noun)} was <b>${esc(ai.name)}</b>. ${aiL} ${S.myLie ? `You lied on its question ${S.myLie}.` : "You told the truth every time."}</p>
+    <div class="sharebox mt" id="shareText">${esc(shareText())}</div>
+    <div class="row mt"><button class="btn primary" id="copy">Copy result</button>${S.practice ? "" : `<span class="muted" id="cdwrap">Next duel in <b id="cd" style="font-variant-numeric:tabular-nums"></b></span>`}</div>
+    <p class="muted" id="copied" style="margin-top:6px" aria-live="polite"></p>
+    ${showPrompt ? `<div class="prompt mt"><p style="font-weight:600">Keep track of your daily progress?</p><p class="muted" style="margin-top:2px">Log in or create an account to save your streak on any device. You can keep playing without one.</p>
+      <div class="row mt"><button class="btn primary" data-auth="login">Log in</button><button class="btn" data-auth="signup">Create an account</button><button class="btn" id="notNow" style="border-color:transparent;background:transparent">Not now</button></div></div>` : ""}
+    ${S.practice ? "" : `<div class="stats4 mt"><div><b>${st.played}</b><span>Played</span></div><div><b>${st.played ? Math.round(100 * st.wins / st.played) : 0}%</b><span>Won</span></div><div><b>${st.cur}</b><span>Win streak</span></div><div><b>${st.max}</b><span>Best streak</span></div></div>`}
+    <details class="mt"><summary><b>Fact sheet: ${esc(ai.name)}</b></summary><div class="mt">${factTable(ai)}</div></details>
+    <div class="row mt"><button class="btn" id="practice">Play a practice round</button>${S.practice ? `<button class="btn" id="toDaily">Back to today's duel</button>` : ""}</div>`;
+}
+
+function logHTML() {
+  if (!S.log.length) return `<p class="muted">No questions yet. You go first.</p>`;
+  return S.log.slice().reverse().map(e => {
+    const lbl = e.who === "you" ? `<span class="tag t-you">You · Q${e.n}</span>` : `<span class="tag t-ai">AI · Q${e.n}</span>`;
+    let txt, ans;
+    if (e.kind === "g") {
+      txt = `Is it ${esc(M().byId[e.g].name)}?`;
+      ans = e.ok ? `<span style="color:var(--ok)">Correct</span>` : `<span style="color:var(--bad)">Wrong</span>`;
+    } else {
+      txt = esc(qText(e.k));
+      const show = e.lie && (e.who === "ai" || S.phase === "over");
+      ans = `${e.ans ? "Yes" : "No"}${show ? ` <span class="tag t-lie">${e.who === "ai" ? "you lied" : "AI lied"}</span>` : ""}`;
+    }
+    return `<div class="entry">${lbl}<span style="min-width:0">${txt}</span><span class="ans">${ans}</span></div>`;
+  }).join("");
+}
+
+function padHTML() {
+  return `<details ${S.phase === "over" ? "" : "open"}><summary><b>Case notes</b> <span class="muted">· tap to cross out</span></summary>
+    <div class="pad">${M().sorted.map(e => `<button data-c="${e.id}" class="${S.crossed.includes(e.id) ? "out" : ""}" title="${esc(e.name)}">${esc(e.name)}</button>`).join("")}</div></details>`;
+}
+
+function playHTML() {
+  let action;
+  if (S.phase === "you") action = yourTurnHTML();
+  else if (S.phase === "think") action = `<span class="tag t-ai">AI's turn</span><p class="mt thinking">The AI is thinking</p>`;
+  else if (S.phase === "aiAsks") action = aiAsksHTML();
+  else action = overHTML();
+  return `${scoreHTML()}
+    <section class="card paper" aria-live="polite">${action}</section>
+    ${S.phase !== "over" ? `<section class="card"><p class="muted">Your secret: <b style="color:var(--ink)">${esc(M().byId[S.me].name)}</b>. The referee answers the AI's questions about it for you.</p></section>` : ""}
+    <section class="card log"><h3 style="margin-bottom:6px">Transcript</h3>${logHTML()}</section>
+    <section class="card">${padHTML()}</section>`;
+}
+
+function helpHTML() {
+  const m = M();
+  return `<section class="card stack">
+    <div class="row" style="justify-content:space-between"><h1>How to play</h1><button class="btn" id="back">Back to the duel</button></div>
+    <p>${esc(HOW_TO_PLAY)}</p>
+    <h3 class="mt">The details</h3>
+    <p>Each side gets ${MAX_TURNS} turns. On your turn, ask one question or make one guess. A wrong guess still uses the turn.</p>
+    <p>When the AI asks about your secret, a referee shows the true answer. Tell the truth, or lie once per game. You can't lie on judgement calls (they say "Ruling").</p>
+    <p>The AI may also lie once on your questions, or never. It's decided each day and is the same for everyone. You find out at the end.</p>
+    <p>There's one duel per mode per day, and the AI's pick is the same for everyone. Share your result without spoiling it.</p>
+    <h3 class="mt">Rulings for ${esc(m.label.toLowerCase())}</h3>
+    ${m.rules.map(r => `<p class="muted">${esc(r)}</p>`).join("")}
+    <p class="muted">Every ${esc(m.noun)} has a fact sheet. It's shown when the duel ends, including any judgement calls.</p>
+  </section>`;
+}
+
+/* ---------- owner metrics ---------- */
+let remoteEvents = null;
+async function loadRemoteEvents() {
+  try { const snap = await FB.db.collection("events").orderBy("t", "desc").limit(20000).get(); remoteEvents = snap.docs.map(d => d.data()); }
+  catch (e) { remoteEvents = []; console.warn(e); }
+  if (view === "stats") render();
+}
+function metricsHTML() {
+  const everyone = !!(FB && isOwner());
+  if (everyone && !remoteEvents) { loadRemoteEvents(); return `<section class="card"><p class="muted">Loading everyone's games…</p></section>`; }
+  const ev = everyone ? remoteEvents : store.get("tp1:events", []);
+  const source = everyone ? "These numbers cover every player's games."
+    : FB && user ? `These numbers only cover this browser. To see everyone's games, add your user ID <code>${esc(user.uid)}</code> to OWNER_UIDS in firebase-config.js and to the database rules (SETUP.md, step 6).`
+    : FB ? "These numbers only cover this browser. Log in with the owner account to see everyone's games."
+    : "These numbers only cover games played in this browser. Once the game is connected to Firebase, the same events go to a shared database and this page shows everyone's games.";
+  const starts = ev.filter(e => e.type === "start"), ends = ev.filter(e => e.type === "end");
+  const daily = ends.filter(e => !e.practice);
+  const pct = (a, b) => b ? Math.round(100 * a / b) + "%" : "—";
+  const avg = a => a.length ? (a.reduce((x, y) => x + y, 0) / a.length).toFixed(1) : "—";
+  const top = (arr, n = 8) => Object.entries(arr.reduce((o, k) => (o[k] = (o[k] || 0) + 1, o), {})).sort((a, b) => b[1] - a[1]).slice(0, n);
+  const byDay = {};
+  for (const e of ev) { const d = dateKey(new Date(e.t)); byDay[d] = byDay[d] || { s: 0, f: 0, w: 0, sh: 0, p: new Set() }; const r = byDay[d]; r.p.add(e.pid); if (e.type === "start") r.s++; if (e.type === "end") { r.f++; if (e.win === "you") r.w++; } if (e.type === "share") r.sh++; }
+  const names = (mk, id) => (MODES[mk] && MODES[mk].byId[id]) ? MODES[mk].byId[id].name : id;
+  const tile = (label, v) => `<div style="background:var(--chip);border-radius:10px;padding:10px 12px"><span class="muted">${label}</span><b style="display:block;font:700 22px var(--display)">${v}</b></div>`;
+  return `<section class="card stack">
+    <div class="row" style="justify-content:space-between"><h1>Owner stats</h1><a class="btn" href="#">Back to the game</a></div>
+    <p class="muted">${source}</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
+      ${tile("Players", new Set(ev.map(e => e.pid)).size)}${tile("Duels started", starts.length)}${tile("Duels finished", ends.length)}
+      ${tile("Finish rate", pct(ends.length, starts.length))}${tile("Player win rate", pct(ends.filter(e => e.win === "you").length, ends.length))}${tile("Avg turns to win", avg(ends.filter(e => e.win === "you").map(e => e.yt)))}
+      ${tile("Players who lied", pct(ends.filter(e => e.myLie).length, ends.length))}${tile("Duels where AI lied", pct(ends.filter(e => e.aiLie).length, ends.length))}${tile("Share clicks", ev.filter(e => e.type === "share").length)}
+      ${tile("Daily vs practice", `${daily.length} / ${ends.length - daily.length}`)}
+    </div>
+    <h3 class="mt">By day</h3>
+    <div class="tablewrap"><table class="facts"><tr><td><b>Date</b></td><td>Players · started · finished · won · shared</td></tr>
+      ${Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0])).map(([d, r]) => `<tr><td>${d}</td><td>${r.p.size} · ${r.s} · ${r.f} · ${r.w} · ${r.sh}</td></tr>`).join("") || `<tr><td colspan="2" class="muted">No games yet.</td></tr>`}</table></div>
+    <h3 class="mt">Most picked secrets</h3>
+    <div class="tablewrap"><table class="facts">${top(ends.map(e => e.mode + ":" + e.me)).map(([k, n]) => { const [mk, id] = k.split(":"); return `<tr><td>${esc(names(mk, id))}</td><td>${n}</td></tr>`; }).join("") || `<tr><td class="muted">No games yet.</td></tr>`}</table></div>
+    <h3 class="mt">Most asked questions</h3>
+    <div class="tablewrap"><table class="facts">${top(ends.flatMap(e => (e.asked || []).map(k => e.mode + ":" + k)), 10).map(([k, n]) => { const [mk, q] = k.split(":"); const m = MODES[mk]; const t = q.startsWith("b:") ? "Does it border …?" : (m && m.qByK[q] ? m.qByK[q].t : q); return `<tr><td>${esc(t)} <span class="muted">(${esc(m ? m.label : mk)})</span></td><td>${n}</td></tr>`; }).join("") || `<tr><td class="muted">No games yet.</td></tr>`}</table></div>
+    <div class="row mt"><button class="btn" id="exportEv">Copy raw events</button><span class="muted" id="exMsg"></span></div>
+  </section>`;
+}
+function bindMetrics() {
+  $("exportEv").onclick = () => {
+    const t = JSON.stringify(store.get("tp1:events", []));
+    navigator.clipboard.writeText(t).then(() => $("exMsg").textContent = "Copied.").catch(() => $("exMsg").textContent = "Couldn't copy here.");
+  };
+}
+
+/* ---------- interactions ---------- */
+function bind() {
+  if (S.phase === "setup") {
+    picker("pick", "pickGo", "psugg", id => { S.pend = id; save(); render(); });
+    if ($("rand")) $("rand").onclick = () => { S.pend = M().ents[Math.floor(Math.random() * M().ents.length)].id; save(); render(); };
+    if ($("clear")) $("clear").onclick = () => { S.pend = null; save(); render(); };
+    if ($("start")) $("start").onclick = () => { S.me = S.pend; S.phase = "you"; track("start", { mode: modeKey, day: S.day, practice: S.practice, me: S.me }); save(); render(); };
+  }
+  if (S.phase === "you") {
+    document.querySelectorAll("#qbank [data-q]").forEach(b => b.onclick = () => youAsk(b.dataset.q));
+    const filter = () => {
+      const q = norm($("qsearch").value);
+      document.querySelectorAll("#qbank > *").forEach(el => { el.hidden = !((activeGroup === "All" || el.dataset.g === activeGroup) && (!q || el.dataset.s.includes(q))); });
+    };
+    document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => { activeGroup = b.dataset.tab; document.querySelectorAll("#tabs button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); filter(); });
+    $("qsearch").addEventListener("input", filter);
+    filter();
+    picker("bq", "bqGo", "bqsugg", id => {
+      const k = "b:" + id;
+      if (k in S.yAsked) { $("bqsugg").innerHTML = `<p class="err">You already asked that. The answer was ${S.yAsked[k] ? "yes" : "no"}.</p>`; return; }
+      youAsk(k);
+    });
+    picker("guess", "guessGo", "gsugg", id => {
+      $("gsugg").innerHTML = `<div class="pickbox row"><span>Guess <b>${esc(M().byId[id].name)}</b>?</span><button class="btn primary" id="gConfirm">Make the guess</button><button class="btn" id="gCancel">Cancel</button></div>`;
+      $("gConfirm").onclick = () => youGuess(id);
+      $("gCancel").onclick = () => { $("gsugg").innerHTML = ""; };
+    }, { free: true });
+  }
+  if (S.phase === "aiAsks") {
+    $("truth").onclick = () => answer(false);
+    if (!$("lie").disabled) $("lie").onclick = () => answer(true);
+  }
+  if (S.phase === "over") {
+    $("copy").onclick = () => {
+      track("share", { mode: modeKey, day: S.day, practice: S.practice });
+      navigator.clipboard.writeText(shareText()).then(() => $("copied").textContent = "Copied. Paste it anywhere.").catch(() => {
+        const r = document.createRange(); r.selectNodeContents($("shareText")); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        $("copied").textContent = "Selected. Copy it with Ctrl+C.";
+      });
+    };
+    document.querySelectorAll("[data-auth]").forEach(b => b.onclick = () => openAuth(b.dataset.auth));
+    if ($("notNow")) $("notNow").onclick = () => { store.set("tp1:promptDismissed", S.date); render(); };
+    $("practice").onclick = () => { S = newState(true); render(); window.scrollTo(0, 0); };
+    if ($("toDaily")) $("toDaily").onclick = () => { loadDaily(); render(); };
+  }
+  document.querySelectorAll(".pad [data-c]").forEach(b => b.onclick = () => {
+    const id = b.dataset.c, i = S.crossed.indexOf(id);
+    i >= 0 ? S.crossed.splice(i, 1) : S.crossed.push(id);
+    b.classList.toggle("out"); save();
+  });
+}
+
+function finish(win) {
+  S.phase = "over"; S.win = win;
+  if (!S.practice && !S.counted) {
+    S.counted = true;
+    recordResult(`${modeKey}:${S.day}`, { win, yt: S.yt, at: S.at, date: S.date });
+  }
+  track("end", { mode: modeKey, day: S.day, practice: S.practice, win, yt: S.yt, at: S.at, myLie: S.myLie, aiLie: S.aiLie, me: S.me, ai: S.ai, asked: Object.keys(S.yAsked) });
+  save(); render(); window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function youAsk(k) {
+  S.yt++; S.aq++;
+  const ai = M().byId[S.ai], t = truth(ai, k);
+  const lie = !S.aiLie && S.aiLieAt > 0 && S.aq >= S.aiLieAt && !noteOf(ai, k);
+  const ans = lie ? !t : t;
+  if (lie) S.aiLie = S.yt;
+  S.yAsked[k] = ans;
+  S.log.push({ who: "you", kind: "q", k, ans, lie, n: S.yt });
+  S.flash = "";
+  toAI();
+}
+function youGuess(id) {
+  S.yt++;
+  const ok = id === S.ai;
+  S.log.push({ who: "you", kind: "g", g: id, ok, n: S.yt });
+  if (ok) return finish("you");
+  if (!S.crossed.includes(id)) S.crossed.push(id);
+  S.flash = "";
+  toAI();
+}
+function toAI() { S.phase = "think"; save(); render(); setTimeout(aiAct, 750); }
+
+function aiAct() {
+  if (S.phase !== "think") return;
+  S.at++;
+  const m = M(), r = rng(hash(`${S.seed}:ai:${S.at}`));
+  const live = m.ents.filter(e => !S.aiGuessed.includes(e.id) && (S.mm[e.id] || 0) <= 1);
+  const c0 = live.filter(e => !(S.mm[e.id] || 0));
+  let pool = c0.length ? c0 : live;
+  if (!pool.length) pool = m.ents.filter(e => !S.aiGuessed.includes(e.id));
+  const guess = e => {
+    const ok = e.id === S.me;
+    S.log.push({ who: "ai", kind: "g", g: e.id, ok, n: S.at });
+    if (ok) return finish("ai");
+    S.aiGuessed.push(e.id);
+    S.flash = `The AI guessed ${esc(e.name)}. Wrong!`;
+    afterAI();
+  };
+  if (pool.length === 1) return guess(pool[0]);
+  const keys = m.questions.map(q => q.k).filter(k => !S.aAsked.includes(k));
+  const nbs = new Set(); pool.forEach(e => e.nb.forEach(n => nbs.add(n)));
+  for (const n of nbs) if (!S.aAsked.includes("b:" + n)) keys.push("b:" + n);
+  const opts = keys.map(k => { const y = pool.filter(e => truth(e, k)).length; return { k, b: Math.min(y, pool.length - y), border: k.startsWith("b:") }; })
+    .filter(o => o.b > 0).sort((a, b) => b.b - a.b || a.border - b.border);
+  if (!opts.length || (pool.length === 2 && r() < 0.5)) return guess(pool[Math.floor(r() * pool.length)]);
+  const x = r(), pick = opts[x < 0.55 ? 0 : x < 0.85 ? Math.min(1, opts.length - 1) : Math.min(2, opts.length - 1)];
+  S.cur = pick.k; S.aAsked.push(pick.k); S.phase = "aiAsks";
+  save(); render();
+}
+function answer(lie) {
+  const k = S.cur, t = truth(M().byId[S.me], k), ans = lie ? !t : t;
+  if (lie) S.myLie = S.at;
+  S.log.push({ who: "ai", kind: "q", k, ans, lie, n: S.at });
+  for (const e of M().ents) if (truth(e, k) !== ans) S.mm[e.id] = (S.mm[e.id] || 0) + 1;
+  S.flash = `You told the AI "${ans ? "yes" : "no"}"${lie ? ". That was your lie." : "."}`;
+  afterAI();
+}
+function afterAI() {
+  if (S.yt >= MAX_TURNS && S.at >= MAX_TURNS) return finish("draw");
+  S.phase = "you"; save(); render();
+}
+
+/* ---------- countdown ---------- */
+setInterval(() => {
+  const el = $("cd"); if (!el) return;
+  const now = new Date(), next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const s = Math.max(0, Math.floor((next - now) / 1000));
+  el.textContent = `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  if (S && !S.practice && S.date !== dateKey()) { loadDaily(); render(); }
+}, 1000);
+
+/* ---------- boot ---------- */
+document.querySelectorAll(".seg button[data-mode]").forEach(b => b.onclick = () => {
+  modeKey = b.dataset.mode; store.set("tp1:mode", modeKey); activeGroup = "All";
+  if (location.hash) history.replaceState(null, "", location.pathname);
+  view = "game"; loadDaily(); render();
+});
+$("helpBtn").onclick = () => { view = "help"; render(); window.scrollTo(0, 0); };
+$("acctBtn").onclick = () => openAccountMenu();
+// Results saved by the first version of the game (before accounts) carry over.
+(() => { try {
+  const h = savedResults(); let changed = false;
+  for (const mk of Object.keys(MODES)) for (const k of Object.keys(localStorage)) {
+    const m = k.match(new RegExp(`^tp1:game:${mk}:(\\d{4}-\\d{2}-\\d{2})$`));
+    if (!m) continue;
+    const g = store.get(k);
+    if (g && g.phase === "over" && !g.practice && !h[`${mk}:${g.day}`]) { h[`${mk}:${g.day}`] = { win: g.win, yt: g.yt, at: g.at, date: g.date }; changed = true; }
+  }
+  if (changed) store.set("tp1:history", h);
+} catch {} })();
+function route() { view = location.hash === "#stats" ? "stats" : "game"; render(); }
+window.addEventListener("hashchange", route);
+loadDaily();
+route();
+</script>
+</body>
+</html>
