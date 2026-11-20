@@ -562,6 +562,7 @@ async function loadRemoteStats() {
     const snap = await FB.db.collection("stats").orderBy(firebase.firestore.FieldPath.documentId(), "desc").limit(90).get();
     remoteStats = {};
     snap.forEach(d => {
+      if (d.id < LAUNCH_DATE) return;
       const raw = d.data(), scale = raw.sample && raw.sample < 1 ? 1 / raw.sample : 1, row = {};
       for (const k in raw) if (k !== "sample" && typeof raw[k] === "number") row[k] = Math.round(raw[k] * scale);
       row._sampled = scale > 1; remoteStats[d.id] = row;
