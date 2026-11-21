@@ -620,7 +620,8 @@ async function loadRemoteStats() {
   const add = (day, delta) => { const r = remoteStats[day] = remoteStats[day] || {}; for (const k in delta) r[k] = (r[k] || 0) + delta[k]; };
   // Daily running totals (the current format).
   try {
-    const snap = await FB.db.collection("stats").orderBy(firebase.firestore.FieldPath.documentId(), "desc").limit(90).get();
+    // No server-side sorting: that would need a Firestore index. The page sorts the days itself.
+    const snap = await FB.db.collection("stats").limit(500).get();
     snap.forEach(d => {
       if (d.id < LAUNCH_DATE) return;
       const raw = d.data(), scale = raw.sample && raw.sample < 1 ? 1 / raw.sample : 1, row = {};
