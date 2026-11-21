@@ -597,6 +597,23 @@ function helpHTML() {
 }
 
 /* ---------- owner metrics ---------- */
+// Health of the AI question reader, from the worker's /status page.
+let aiStatus = null;
+async function loadAiStatus() {
+  if (!window.QUESTION_AI_URL) { aiStatus = { error: "not connected" }; return; }
+  try { aiStatus = await (await fetch(new URL("status", window.QUESTION_AI_URL), { cache: "no-store" })).json(); }
+  catch { aiStatus = { error: "unreachable" }; }
+  if (view === "stats") render();
+}
+function aiStatusHTML() {
+  if (!aiStatus) { loadAiStatus(); return `<p class="muted">Checking the AI question reader…</p>`; }
+  if (aiStatus.error) return `<p class="err">The AI question reader is ${aiStatus.error === "unreachable" ? "not responding" : "not connected"}.</p>`;
+  const c = aiStatus.counts || {}, n = k => c[k] || 0;
+  const head = !aiStatus.claudeConfigured ? `<p><b>🟡 Claude isn't connected.</b> New questions are answered by the free AI from the fact cards.</p>`
+    : n("claude_failed") ? `<p class="err"><b>🔴 Claude couldn't be reached ${n("claude_failed")} time${n("claude_failed") === 1 ? "" : "s"} today.</b> Check your Anthropic balance and spend limit. The free AI covered those questions.</p>${aiStatus.lastClaudeError ? `<p class="muted">Last error: ${esc(aiStatus.lastClaudeError)}</p>` : ""}`
+    : `<p><b>🟢 Claude is answering new questions.</b></p>`;
+  return `${head}<p class="muted">Today (UTC): ${n("claude_ok")} answered by Claude · ${n("cache_exact")} from the cache · ${n("cache_reworded")} matched a reworded question · ${n("free_answered")} by the free AI${aiStatus.cacheConfigured ? "" : " · the shared cache isn't connected (add the DB binding)"}.</p>`;
+}
 let remoteStats = null;
 async function loadRemoteStats() {
   try {
@@ -631,6 +648,7 @@ function metricsHTML() {
   return `<section class="card stack">
     <div class="row" style="justify-content:space-between"><h1>Owner stats</h1><a class="btn" href="#">Back to the game</a></div>
     <p class="muted">${source}${sampled ? " Some days were sampled, so their numbers are estimates." : ""}</p>
+    <div style="background:var(--chip);border-radius:10px;padding:10px 12px"><h3 style="margin-bottom:4px">AI question reader</h3>${aiStatusHTML()}</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
       ${tile("Player-days", n("players"))}${tile("Duels started", n("started"))}${tile("Duels finished", n("finished"))}
       ${tile("Finish rate", pct(n("finished"), n("started")))}${tile("Player win rate", pct(n("wins_you"), n("finished")))}${tile("Avg turns to win", n("wins_you") ? (n("turns_to_win") / n("wins_you")).toFixed(1) : "—")}

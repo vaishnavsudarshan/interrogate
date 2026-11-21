@@ -1,39 +1,60 @@
 // Interrogate: the question reader (Cloudflare Worker).
 // Paste this whole file into the Cloudflare Worker editor. Bindings and secrets:
-//   - AI                 Workers AI binding (required; the free fallback)
-//   - DB                 D1 database binding (recommended; shares answers between players)
-//   - ANTHROPIC_API_KEY  secret (optional). When set, Claude Haiku reads the questions instead
-//                        of the free model. If Claude is unavailable (no credit left, outage),
-//                        the free model takes over automatically.
+//   - AI                 Workers AI binding (required)
+//   - DB                 D1 database binding (strongly recommended: the shared answer cache)
+//   - ANTHROPIC_API_KEY  secret (optional). When set, Claude Haiku answers new questions.
+//                        If Claude can't be reached, the free model answers from the fact card.
 // The dashboard editor can't install npm packages, so Claude is called over plain HTTPS.
+//
+// How a question is handled:
+//   1. Exact cache: the same question (ignoring case and punctuation) about the same secret.
+//   2. Reworded cache: a free embedding model finds the closest saved questions about this
+//      secret, and a free model decides whether the new one asks exactly the same thing.
+//   3. Otherwise Claude Haiku (or the free model) answers using the secret's fact card, and the
+//      answer is saved for everyone.
 //
 // The game sends: { question, noun, secret, card, facts: [{ k, t, hint }] }
 // It gets back one of:
 //   { kind: "fact", key, negated }       a fact from the game's fact sheet
 //   { kind: "border", place, negated }
 //   { kind: "guess", place }
-//   { kind: "open", answer: "yes"|"no" }  answered from the fact card (or, with Claude, sure knowledge)
-//   { kind: "unknown" }                  can't confirm it: the game says so and the turn isn't used
+//   { kind: "open", answer: "yes"|"no" }
+//   { kind: "unknown" }                  can't confirm it (no turn used)
 //   { kind: "clarify", message }         asks the player what they mean (no turn used)
 //   { kind: "invalid", message }         not a yes/no question
 //   { kind: "busy" }                     rate limited or out of AI allowance for now
+// GET /status returns today's counts for the owner stats page.
 
 const CLAUDE_MODEL = "claude-haiku-5-5";
 const FREE_SMALL = "@cf/meta/llama-3.1-8b-instruct-fast";
 const FREE_BIG = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const EMBED = "@cf/baai/bge-small-en-v1.5";
 
 const ALLOWED = [/^https:\/\/([a-z0-9-]+\.)?interrogate\.pages\.dev$/, /^http:\/\/localhost(:\d+)?$/];
 const PER_MINUTE = 20;
 const KINDS = ["fact", "border", "guess", "open", "unknown", "clarify", "invalid"];
+const SIMILAR = 0.8;           // how close a saved question must be before the judge looks at it
+// Words that flip or change a question's meaning. Two questions only count as the same if
+// they use the same ones ("north of Chad" is never treated like "south of Chad").
+const DIRECTION = /\b(north|south|east|west|northern|southern|eastern|western|more|less|fewer|over|under|above|below|before|after|bigger|smaller|larger|higher|lower|older|newer|first|last|entirely|partly|partially|only|all|any|most|least|than)\b/g;
 
 const memo = new Map();
 const hits = new Map();
-let tableReady = false;
+let tablesReady = false;
+let lastClaudeError = "";
 
 const normQ = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
-async function sha(s) {
-  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(d)].slice(0, 16).map(b => b.toString(16).padStart(2, "0")).join("");
+const dirWords = s => [...new Set(normQ(s).match(DIRECTION) || [])].sort().join(" ");
+
+async function ensureTables(env) {
+  if (tablesReady) return;
+  await env.DB.exec("CREATE TABLE IF NOT EXISTS qa (s TEXT, q TEXT, v TEXT, e TEXT, t INTEGER, PRIMARY KEY (s, q))");
+  await env.DB.exec("CREATE TABLE IF NOT EXISTS health (day TEXT, k TEXT, n INTEGER, PRIMARY KEY (day, k))");
+  tablesReady = true;
+}
+async function count(env, k) {
+  if (!env.DB) return;
+  try { await ensureTables(env); await env.DB.prepare("INSERT INTO health (day, k, n) VALUES (?, ?, 1) ON CONFLICT(day, k) DO UPDATE SET n = n + 1").bind(new Date().toISOString().slice(0, 10), k).run(); } catch (e) {}
 }
 
 function buildPrompt(noun, secret, card, factList, strict) {
@@ -46,7 +67,7 @@ Reply with exactly one JSON object and nothing else.
 2. Asks if it borders/neighbours/touches a named place: {"kind":"border","place":"<place>","negated":false}.
 3. Names one specific ${noun} as a guess ("Is it Peru?"): {"kind":"guess","place":"<name>"}.
 ${rule4}
-5. Only if the meaning is truly unclear and the answer depends on it: {"kind":"clarify","message":"<one short question back>"}.
+5. If the question can reasonably be read in more than one way AND the answer would differ between those readings, ask which they mean instead of picking one: {"kind":"clarify","message":"<one short question back>"}. Examples: "Is it north of Chad?" -> "Do you mean entirely north of Chad, or just partly?"; "Is it big?" -> "Big by area or by population?"; "Is it near the sea?" -> "Do you mean does it have a coastline, or is it close to one?". Don't ask when every reading gives the same answer.
 6. Not answerable with yes or no: {"kind":"invalid","message":"<one short sentence asking for a yes or no question>"}.
 Treat unusual terms sensibly, e.g. "Afroeurasia" means Africa, Europe and Asia together.
 Never reveal or hint at the secret's name in a message.
@@ -84,18 +105,51 @@ async function askClaude(env, system, question) {
       messages: [{ role: "user", content: question }],
     }),
   });
-  if (!res.ok) throw new Error("claude " + res.status);
+  if (!res.ok) throw new Error(`Claude returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const msg = await res.json();
-  if (msg.stop_reason !== "end_turn") throw new Error("claude stop " + msg.stop_reason);
-  const text = (msg.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-  return JSON.parse(text);
+  if (msg.stop_reason !== "end_turn") throw new Error("Claude stopped: " + msg.stop_reason);
+  return JSON.parse((msg.content || []).filter(b => b.type === "text").map(b => b.text).join(""));
 }
 
-async function askFree(env, model, system, question) {
-  const out = await env.AI.run(model, { messages: [{ role: "system", content: system }, { role: "user", content: question }], max_tokens: 80, temperature: 0 });
+async function askFree(env, model, system, question, maxTokens = 80) {
+  const out = await env.AI.run(model, { messages: [{ role: "system", content: system }, { role: "user", content: question }], max_tokens: maxTokens, temperature: 0 });
   const text = typeof out.response === "string" ? out.response : JSON.stringify(out.response || {});
   const m = text.match(/\{[\s\S]*?\}/);
   return m ? JSON.parse(m[0]) : null;
+}
+
+async function embed(env, text) {
+  const out = await env.AI.run(EMBED, { text: [text] });
+  return out && out.data && out.data[0];
+}
+const cosine = (a, b) => { let d = 0, x = 0, y = 0; for (let i = 0; i < a.length; i++) { d += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; } return d / Math.sqrt(x * y || 1); };
+
+// Is the new question the same as a saved one? Returns { result } or null.
+async function reworded(env, secret, question, vec) {
+  if (!vec) return null;
+  const rows = (await env.DB.prepare("SELECT q, v, e FROM qa WHERE s = ? AND e IS NOT NULL ORDER BY t DESC LIMIT 400").bind(secret).all()).results || [];
+  const dir = dirWords(question);
+  const near = rows.map(r => ({ q: r.q, v: JSON.parse(r.v), sim: cosine(vec, JSON.parse(r.e)) }))
+    .filter(r => r.sim >= SIMILAR && dirWords(r.q) === dir && ["fact", "border", "open", "unknown"].includes(r.v.kind))
+    .sort((a, b) => b.sim - a.sim).slice(0, 5);
+  if (!near.length) return null;
+  const list = near.map((r, i) => `${i + 1}. "${r.q}"`).join("\n");
+  const judge = await askFree(env, FREE_BIG, `You compare questions about the same secret place in a yes/no game.
+Decide if the NEW question asks exactly the same thing as one of the SAVED questions, so the same yes/no answer applies.
+Reply with one JSON object only: {"match": <number of the saved question, or 0>, "opposite": <true if the new question asks the exact opposite of that saved question, else false>}.
+Only match if you are completely sure the meaning is the same (or exactly opposite). If there is any difference in detail, place, amount, direction or scope, reply {"match": 0, "opposite": false}.
+
+SAVED:
+${list}`, `NEW: "${question}"`, 40);
+  const n = judge && Number(judge.match);
+  if (!n || n < 1 || n > near.length) return null;
+  const v = { ...near[n - 1].v };
+  if (judge.opposite === true) {
+    if (v.kind === "open") v.answer = v.answer === "yes" ? "no" : "yes";
+    else if (v.kind === "fact" || v.kind === "border") v.negated = !v.negated;
+    else return null;
+  }
+  return v;
 }
 
 const valid = (p, facts) => p && KINDS.includes(p.kind) && (p.kind !== "fact" || facts.some(f => f.k === p.key)) && (p.kind !== "open" || p.answer === "yes" || p.answer === "no");
@@ -106,12 +160,18 @@ export default {
     const ok = ALLOWED.some(re => re.test(origin));
     const cors = {
       "Access-Control-Allow-Origin": ok ? origin : "https://interrogate.pages.dev",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
       "Vary": "Origin",
     };
     const reply = (obj, status = 200) => Response.json(obj, { status, headers: cors });
     if (request.method === "OPTIONS") return new Response(null, { headers: cors });
+
+    if (request.method === "GET" && new URL(request.url).pathname === "/status" && ok) {
+      const day = new Date().toISOString().slice(0, 10), counts = {};
+      if (env.DB) { try { await ensureTables(env); const r = await env.DB.prepare("SELECT k, n FROM health WHERE day = ?").bind(day).all(); for (const x of r.results || []) counts[x.k] = x.n; } catch (e) {} }
+      return reply({ claudeConfigured: !!env.ANTHROPIC_API_KEY, cacheConfigured: !!env.DB, day, counts, lastClaudeError: lastClaudeError || null });
+    }
     if (request.method !== "POST" || !ok) return new Response("Not allowed", { status: 403, headers: cors });
 
     const ip = request.headers.get("CF-Connecting-IP") || "?";
@@ -126,48 +186,62 @@ export default {
     const question = String(body.question || "").slice(0, 200);
     const noun = String(body.noun || "country").slice(0, 40);
     const secret = String(body.secret || "").slice(0, 80);
-    const card = String(body.card || "").slice(0, 4000);
+    const card = String(body.card || "").slice(0, 6000);
     const facts = Array.isArray(body.facts) ? body.facts.slice(0, 80) : [];
-    if (!normQ(question)) return reply({ kind: "invalid", message: "Type a question first." });
+    const q = normQ(question);
+    if (!q) return reply({ kind: "invalid", message: "Type a question first." });
+    const sKey = `${noun}|${secret}`;
+    const mKey = `${sKey}|${q}`;
 
-    const useClaude = !!env.ANTHROPIC_API_KEY;
-    const key = await sha(`v2|${useClaude ? "claude" : "free"}|${noun}|${secret}|${normQ(question)}`);
-    if (memo.has(key)) return reply(memo.get(key));
+    // 1. Exact cache.
+    if (memo.has(mKey)) { await count(env, "cache_exact"); return reply(memo.get(mKey)); }
     if (env.DB) {
       try {
-        if (!tableReady) { await env.DB.exec("CREATE TABLE IF NOT EXISTS answers (k TEXT PRIMARY KEY, v TEXT, t INTEGER)"); tableReady = true; }
-        const row = await env.DB.prepare("SELECT v FROM answers WHERE k = ?").bind(key).first();
-        if (row) { const v = JSON.parse(row.v); remember(key, v); return reply(v); }
-      } catch (e) { /* the cache is a bonus; carry on without it */ }
+        await ensureTables(env);
+        const row = await env.DB.prepare("SELECT v FROM qa WHERE s = ? AND q = ?").bind(sKey, q).first();
+        if (row) { const v = JSON.parse(row.v); remember(mKey, v); await count(env, "cache_exact"); return reply(v); }
+      } catch (e) {}
     }
 
+    // 2. Reworded cache.
+    let vec = null;
+    if (env.DB) {
+      try {
+        vec = await embed(env, q);
+        const v = await reworded(env, sKey, q, vec);
+        if (v) { remember(mKey, v); await save(env, sKey, q, v, vec); await count(env, "cache_reworded"); return reply(v); }
+      } catch (e) {}
+    }
+
+    // 3. Ask Claude (or the free model).
     const factList = facts.map(f => `${String(f.k).slice(0, 20)}: ${String(f.t).slice(0, 80)}${f.hint ? ` (${String(f.hint).slice(0, 100)})` : ""}`).join("\n");
     let result = null, busy = false;
-
-    if (useClaude) {
-      try { const p = await askClaude(env, buildPrompt(noun, secret, card, factList, false), question); if (valid(p, facts)) result = p; }
-      catch (e) { /* no credit left, outage, etc.: fall through to the free model */ }
+    if (env.ANTHROPIC_API_KEY) {
+      try { const p = await askClaude(env, buildPrompt(noun, secret, card, factList, false), question); if (valid(p, facts)) { result = p; await count(env, "claude_ok"); } }
+      catch (e) { lastClaudeError = `${new Date().toISOString()} ${String(e.message || e).slice(0, 240)}`; await count(env, "claude_failed"); }
     }
     if (!result) {
       const system = buildPrompt(noun, secret, card, factList, true);
       for (const model of [FREE_SMALL, FREE_BIG]) {
-        try { const p = await askFree(env, model, system, question); if (valid(p, facts)) { result = p; break; } }
+        try { const p = await askFree(env, model, system, question); if (valid(p, facts)) { result = p; await count(env, "free_answered"); break; } }
         catch (e) { if (String(e).match(/limit|quota|neuron|429|capacity/i)) busy = true; }
       }
     }
-    if (!result) return reply({ kind: busy ? "busy" : "unavailable" });
+    if (!result) { await count(env, busy ? "busy" : "unanswered"); return reply({ kind: busy ? "busy" : "unavailable" }); }
 
     if (result.message && secret && result.message.toLowerCase().includes(secret.toLowerCase())) result.message = "Can you ask that more specifically?";
     const clean = { kind: result.kind };
     for (const f of ["key", "place", "answer", "message"]) if (typeof result[f] === "string") clean[f] = result[f].slice(0, 160);
     if (typeof result.negated === "boolean") clean.negated = result.negated;
 
-    remember(key, clean);
-    if (env.DB && clean.kind !== "clarify") {
-      try { await env.DB.prepare("INSERT OR REPLACE INTO answers (k, v, t) VALUES (?, ?, ?)").bind(key, JSON.stringify(clean), Date.now()).run(); } catch (e) {}
-    }
+    remember(mKey, clean);
+    if (clean.kind !== "clarify") await save(env, sKey, q, clean, vec);
     return reply(clean);
   },
 };
 
+async function save(env, s, q, v, vec) {
+  if (!env.DB) return;
+  try { await env.DB.prepare("INSERT OR REPLACE INTO qa (s, q, v, e, t) VALUES (?, ?, ?, ?, ?)").bind(s, q, JSON.stringify(v), vec ? JSON.stringify(vec.map(x => Math.round(x * 1e4) / 1e4)) : null, Date.now()).run(); } catch (e) {}
+}
 function remember(k, v) { memo.set(k, v); if (memo.size > 20000) memo.delete(memo.keys().next().value); }
