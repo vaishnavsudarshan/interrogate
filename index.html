@@ -540,7 +540,7 @@ function overHTML() {
       <div class="row mt"><button class="btn primary" data-auth="login">Log in</button><button class="btn" data-auth="signup">Create an account</button><button class="btn" id="notNow" style="border-color:transparent;background:transparent">Not now</button></div></div>` : ""}
     ${S.practice ? "" : `<div class="stats4 mt"><div><b>${st.played}</b><span>Played</span></div><div><b>${st.played ? Math.round(100 * st.wins / st.played) : 0}%</b><span>Won</span></div><div><b>${st.cur}</b><span>Win streak</span></div><div><b>${st.max}</b><span>Best streak</span></div></div>`}
     <details class="mt"><summary><b>Fact sheet: ${esc(ai.name)}</b></summary><div class="mt">${factTable(ai)}</div></details>
-    <div class="row mt"><button class="btn" id="practice">Play a practice round</button>${S.practice ? `<button class="btn" id="toDaily">Back to today's duel</button>` : ""}</div>`;
+    `;
 }
 
 function logHTML() {
@@ -672,7 +672,7 @@ function metricsHTML() {
       ${tile("Player-days", n("players"))}${tile("Duels started", n("started"))}${tile("Duels finished", n("finished"))}
       ${tile("Finish rate", pct(n("finished"), n("started")))}${tile("Player win rate", pct(n("wins_you"), n("finished")))}${tile("Avg turns to win", n("wins_you") ? (n("turns_to_win") / n("wins_you")).toFixed(1) : "—")}
       ${tile("Players who lied", pct(n("lied_you"), n("finished")))}${tile("Duels where AI lied", pct(n("lied_ai"), n("finished")))}${tile("Share clicks", n("shares"))}
-      ${tile("Practice rounds", n("practice"))}${tile("Free-form questions", n("open_questions"))}
+      ${tile("Free-form questions", n("open_questions"))}
     </div>
     <h3 class="mt">By day</h3>
     <div class="tablewrap"><table class="facts"><tr><td><b>Release day</b></td><td>Players · started · finished · won · shared</td></tr>
@@ -717,7 +717,7 @@ function bind() {
     };
     document.querySelectorAll("[data-auth]").forEach(b => b.onclick = () => openAuth(b.dataset.auth));
     if ($("notNow")) $("notNow").onclick = () => { store.set("tp2:promptDismissed", S.day); render(); };
-    $("practice").onclick = () => { S = newState(true); render(); window.scrollTo(0, 0); };
+
     if ($("toDaily")) $("toDaily").onclick = () => { loadDaily(); render(); };
   }
   document.querySelectorAll(".pad [data-c]").forEach(b => b.onclick = () => {
