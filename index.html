@@ -157,6 +157,7 @@ details summary { cursor: pointer; }
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="countries-raw.js"></script>
+<script src="cards-data.js"></script>
 <script src="data.js"></script>
 <script>
 "use strict";
@@ -190,13 +191,16 @@ function pacificParts(d) {
   return { y: +p.year, m: +p.month, d: +p.day, h: +p.hour, mi: +p.minute, s: +p.second };
 }
 // Release date ("YYYY-MM-DD") of the duel that's live at moment d.
-function dateKey(d = new Date()) {
+// The real time, corrected by the server clock in case this device's clock is wrong.
+let CLOCK_SKEW = 0;
+const now = () => new Date(Date.now() + CLOCK_SKEW);
+function dateKey(d = now()) {
   const p = pacificParts(d);
   return new Date(Date.UTC(p.y, p.m - 1, p.d) - (p.h < RELEASE_HOUR ? 864e5 : 0)).toISOString().slice(0, 10);
 }
-function dayNumber(d = new Date()) { return Math.max(1, Math.round((Date.parse(dateKey(d)) - Date.parse(LAUNCH_DATE)) / 864e5) + 1); }
+function dayNumber(d = now()) { return Math.max(1, Math.round((Date.parse(dateKey(d)) - Date.parse(LAUNCH_DATE)) / 864e5) + 1); }
 function secondsToNextDuel() {
-  const p = pacificParts(new Date());
+  const p = pacificParts(now());
   return ((RELEASE_HOUR * 3600 - (p.h * 3600 + p.mi * 60 + p.s) + 86400) % 86400) || 86400;
 }
 const norm = s => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
@@ -794,7 +798,7 @@ async function aiRead(raw) {
   const m = M();
   const res = await fetch(window.QUESTION_AI_URL, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question: raw, noun: m.noun, secret: m.byId[S.ai].name, facts: m.questions.map(q => ({ k: q.k, t: q.t, hint: q.hint || "" })) }),
+    body: JSON.stringify({ question: raw, noun: m.noun, secret: m.byId[S.ai].name, card: m.byId[S.ai].card || "", facts: m.questions.map(q => ({ k: q.k, t: q.t, hint: q.hint || "" })) }),
   });
   if (!res.ok) throw new Error("reader " + res.status);
   return res.json();
@@ -830,6 +834,7 @@ async function handleQuestion(raw) {
       return askOpen(text, r.answer === "yes");
     case "clarify": return say(`<div class="pickbox"><p><b>Quick question back:</b> ${esc(r.message || "Can you say that more specifically?")}</p><p class="muted" style="margin-top:6px">Rephrase and ask again. This doesn't use a turn.</p></div>`);
     case "invalid": return say(`<p class="err">${esc(r.message || "That needs a yes or no answer. Try rephrasing it.")}</p>`);
+    case "unknown": return say(`<div class="pickbox"><p><b>The AI can't confirm that one.</b> Ask something else.</p><p class="muted" style="margin-top:6px">This doesn't use a turn.</p></div>`);
     case "busy": return say(`<p class="err">Lots of questions are coming in right now. Wait a few seconds and ask again. This doesn't use a turn.</p>`);
     default: return say(`<p class="err">I couldn't understand that one. Try asking it a simpler way, like "Is it in Asia?"</p>`);
   }
@@ -940,6 +945,13 @@ document.querySelectorAll(".seg button[data-mode]").forEach(b => b.onclick = () 
 });
 $("helpBtn").onclick = () => { view = "help"; render(); window.scrollTo(0, 0); };
 $("acctBtn").onclick = () => openAccountMenu();
+// Check the server's clock once, so a wrong device clock can't put a player on the wrong day.
+fetch(location.pathname, { method: "HEAD", cache: "no-store" }).then(r => {
+  const server = Date.parse(r.headers.get("date") || "");
+  if (!server || Math.abs(server - Date.now()) < 120000) return;
+  CLOCK_SKEW = server - Date.now();
+  if (S && !S.practice && S.day !== dayNumber()) { loadDaily(); render(); }
+}).catch(() => {});
 function route() { view = location.hash === "#stats" ? "stats" : "game"; render(); }
 window.addEventListener("hashchange", route);
 loadDaily();

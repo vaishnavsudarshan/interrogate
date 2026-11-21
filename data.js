@@ -154,6 +154,77 @@ const C_QUESTIONS = [
   ["nstan", "Does its name end in -stan?", "Name"],
 ];
 
+// Group memberships for the fact cards, kept by hand (current as of 2025-26) because the
+// open databases had several out-of-date or wrong entries.
+const C_GROUPS = [
+  ["the African Union", "*africa"],
+  ["the Arab League", "ARE BHR COM DJI DZA EGY IRQ JOR KWT LBN LBY MAR MRT OMN PSE QAT SAU SDN SOM SYR TUN YEM"],
+  ["ASEAN", "BRN KHM IDN LAO MYS MMR PHL SGP THA VNM TLS"],
+  ["OPEC", "DZA COG GNQ GAB IRN IRQ KWT LBY NGA SAU ARE VEN"],
+  ["BRICS", "BRA RUS IND CHN ZAF EGY ETH IRN ARE IDN"],
+  ["Mercosur (full member)", "ARG BRA PRY URY BOL"],
+  ["ECOWAS", "BEN CIV CPV GHA GIN GMB GNB LBR NGA SEN SLE TGO"],
+  ["the Organisation of Islamic Cooperation", "AFG ALB ARE AZE BEN BFA BGD BHR BRN CIV CMR COM DJI DZA EGY GAB GIN GMB GNB GUY IDN IRN IRQ JOR KAZ KGZ KWT LBN LBY MAR MDV MLI MOZ MRT MYS NER NGA OMN PAK PSE QAT SAU SDN SEN SLE SOM SUR SYR TCD TGO TJK TKM TUN TUR UGA UZB YEM"],
+  ["the Gulf Cooperation Council", "ARE BHR KWT OMN QAT SAU"],
+  ["the Council of Europe", "ALB AND ARM AUT AZE BEL BGR BIH CHE CYP CZE DEU DNK ESP EST FIN FRA GBR GEO GRC HRV HUN IRL ISL ITA LIE LTU LUX LVA MCO MDA MKD MLT MNE NLD NOR POL PRT ROU SMR SRB SVK SVN SWE TUR UKR"],
+  ["the OECD", "AUS AUT BEL CAN CHL COL CRI CZE DNK EST FIN FRA DEU GRC HUN ISL IRL ISR ITA JPN KOR LVA LTU LUX MEX NLD NZL NOR POL PRT SVK SVN ESP SWE CHE TUR GBR USA"],
+  ["the Schengen Area", "AUT BEL BGR HRV CZE DNK EST FIN FRA DEU GRC HUN ISL ITA LVA LIE LTU LUX MLT NLD NOR POL PRT ROU SVK SVN ESP SWE CHE"],
+  ["SADC (Southern African Development Community)", "AGO BWA COD COM LSO MDG MOZ MUS MWI NAM SWZ SYC TZA ZAF ZMB ZWE"],
+  ["CARICOM", "ATG BHS BRB BLZ DMA GRD GUY HTI JAM KNA LCA VCT SUR TTO"],
+  ["EFTA", "CHE ISL LIE NOR"],
+  ["the Pacific Islands Forum", "AUS NZL FJI PNG SLB VUT FSM KIR MHL NRU PLW TON TUV WSM"],
+  ["the Shanghai Cooperation Organisation", "CHN RUS IND PAK KAZ KGZ TJK UZB IRN BLR"],
+  ["SAARC", "AFG BGD BTN IND MDV NPL PAK LKA"],
+  ["the Andean Community", "BOL COL ECU PER"],
+  ["the Community of Portuguese Language Countries", "AGO BRA CPV GNB GNQ MOZ PRT STP TLS"],
+];
+const C_EXTRA = [
+  ["A permanent member of the UN Security Council.", "USA RUS CHN GBR FRA"],
+  ["Has nuclear weapons.", "USA RUS CHN GBR FRA IND PAK PRK ISR"],
+  ["A former Soviet republic (part of the USSR until 1991).", "ARM AZE BLR EST GEO KAZ KGZ LVA LTU MDA RUS TJK TKM UKR UZB"],
+  ["A former part of Yugoslavia.", "BIH HRV MKD MNE SRB SVN"],
+  ["The most populous country in the world (it passed China in 2023).", "IND"],
+  ["The second most populous country in the world.", "CHN"],
+  ["The largest country in the world by area.", "RUS"],
+  ["The smallest country in the world, both by area and population.", "VAT"],
+  ["The most populous country in Africa.", "NGA"],
+  ["The largest country in Africa by area.", "DZA"],
+  ["The largest country in South America by area and population.", "BRA"],
+];
+const C_NOT = { ISR: "Israel has never officially confirmed its nuclear weapons, but is widely known to have them." };
+
+// The fact card the AI question reader answers from: the game's own facts in plain words,
+// plus capital, currency, flag description and more from cards-data.js.
+function countryCard(e, byId) {
+  const has = k => e.f.has(k);
+  const cont = [["c_eu", "Europe"], ["c_as", "Asia"], ["c_af", "Africa"], ["c_na", "North America"], ["c_sa", "South America"], ["c_oc", "Oceania"]].filter(([k]) => has(k)).map(([, n]) => n);
+  const reg = C_QUESTIONS.filter(([k]) => k.startsWith("r_") && has(k)).map(([, t]) => t.replace(/^Is it (in |a )?(the )?/, "").replace(/\?$/, ""));
+  const pop = has("p100") ? "over 100 million" : has("p50") ? "50 to 100 million" : has("p100k") ? "under 100,000" : has("p1") ? "under 1 million" : "between 1 and 50 million";
+  const member = [["eu", "the European Union"], ["nato", "NATO"], ["commonwealth", "the Commonwealth"], ["g20", "the G20"]].filter(([k]) => has(k)).map(([, n]) => n);
+  const lang = [["l_en", "English"], ["l_es", "Spanish"], ["l_fr", "French"], ["l_ar", "Arabic"], ["l_pt", "Portuguese"], ["l_ru", "Russian"], ["l_de", "German"]].filter(([k]) => has(k)).map(([, n]) => n);
+  const parts = [
+    `${e.name}.`,
+    `Continent: ${cont.join(" and ")}.`,
+    reg.length ? `Region: ${reg.join(", ")}.` : "",
+    has("ll") ? "Landlocked." : "Has a coastline.",
+    has("island") ? "An island nation." : "",
+    has("med") ? "On the Mediterranean." : "",
+    e.nb.length ? `Land borders: ${e.nb.map(id => byId[id].name).join(", ")}.` : "No land borders with other countries.",
+    `Population: ${pop}.`,
+    lang.length ? `Official languages include ${lang.join(", ")} (game rules).` : "",
+    has("monarchy") ? "A monarchy." : "Not a monarchy.",
+    member.length ? `Member of ${member.join(", ")}.` : "Not in the EU, NATO, the Commonwealth or the G20.",
+    has("left") ? "Drives on the left." : "Drives on the right.",
+    has("olympics") ? "Has hosted the Summer Olympics." : "",
+    has("worldcup") ? "Has hosted the men's World Cup." : "",
+    (() => { const g = C_GROUPS.filter(([, l]) => l === "*africa" ? has("c_af") : l.split(" ").includes(e.id)).map(([n]) => n); return g.length ? `Also a member of ${g.join(", ")}.` : ""; })(),
+    ...C_EXTRA.filter(([, l]) => l.split(" ").includes(e.id)).map(([t]) => t),
+    C_NOT[e.id] || "",
+    typeof COUNTRY_CARDS !== "undefined" && COUNTRY_CARDS[e.id] ? COUNTRY_CARDS[e.id] : "",
+  ];
+  return parts.filter(Boolean).join(" ");
+}
+
 function buildCountries() {
   const valid = new Set(RAW_COUNTRIES.map(r => r[0]));
   const lang = { eng: "l_en", spa: "l_es", fra: "l_fr", ara: "l_ar", por: "l_pt", rus: "l_ru", deu: "l_de" };
@@ -193,6 +264,8 @@ function buildCountries() {
     if (/stan$/.test(name)) f.add("nstan");
     return { id, name, aliases, f, nb, notes: C_NOTES[id] || {} };
   });
+  const byId = Object.fromEntries(ents.map(e => [e.id, e]));
+  for (const e of ents) e.card = countryCard(e, byId);
   return {
     key: "countries", label: "Countries", noun: "country", symbol: "🌍",
     ents, questions: C_QUESTIONS.map(([k, t, g, hint]) => ({ k, t, g, hint })),
@@ -336,6 +409,57 @@ const S_QUESTIONS = [
   ["nvow", "Does its name start with a vowel?", "Name"],
 ];
 
+// Fact cards for the AI question reader: capital | largest city | nickname.
+const S_CARDS = {
+  AL: ["Montgomery", "Huntsville", "Yellowhammer State; Heart of Dixie"], AK: ["Juneau", "Anchorage", "The Last Frontier"],
+  AZ: ["Phoenix", "Phoenix", "Grand Canyon State"], AR: ["Little Rock", "Little Rock", "The Natural State"],
+  CA: ["Sacramento", "Los Angeles", "Golden State"], CO: ["Denver", "Denver", "Centennial State"],
+  CT: ["Hartford", "Bridgeport", "Constitution State"], DE: ["Dover", "Wilmington", "First State"],
+  FL: ["Tallahassee", "Jacksonville", "Sunshine State"], GA: ["Atlanta", "Atlanta", "Peach State"],
+  HI: ["Honolulu", "Honolulu", "Aloha State"], ID: ["Boise", "Boise", "Gem State"],
+  IL: ["Springfield", "Chicago", "Prairie State; Land of Lincoln"], IN: ["Indianapolis", "Indianapolis", "Hoosier State"],
+  IA: ["Des Moines", "Des Moines", "Hawkeye State"], KS: ["Topeka", "Wichita", "Sunflower State"],
+  KY: ["Frankfort", "Louisville", "Bluegrass State"], LA: ["Baton Rouge", "New Orleans", "Pelican State"],
+  ME: ["Augusta", "Portland", "Pine Tree State"], MD: ["Annapolis", "Baltimore", "Old Line State"],
+  MA: ["Boston", "Boston", "Bay State"], MI: ["Lansing", "Detroit", "Great Lakes State; Wolverine State"],
+  MN: ["Saint Paul", "Minneapolis", "North Star State; Land of 10,000 Lakes"], MS: ["Jackson", "Jackson", "Magnolia State"],
+  MO: ["Jefferson City", "Kansas City", "Show-Me State"], MT: ["Helena", "Billings", "Treasure State"],
+  NE: ["Lincoln", "Omaha", "Cornhusker State"], NV: ["Carson City", "Las Vegas", "Silver State"],
+  NH: ["Concord", "Manchester", "Granite State"], NJ: ["Trenton", "Newark", "Garden State"],
+  NM: ["Santa Fe", "Albuquerque", "Land of Enchantment"], NY: ["Albany", "New York City", "Empire State"],
+  NC: ["Raleigh", "Charlotte", "Tar Heel State"], ND: ["Bismarck", "Fargo", "Peace Garden State"],
+  OH: ["Columbus", "Columbus", "Buckeye State"], OK: ["Oklahoma City", "Oklahoma City", "Sooner State"],
+  OR: ["Salem", "Portland", "Beaver State"], PA: ["Harrisburg", "Philadelphia", "Keystone State"],
+  RI: ["Providence", "Providence", "Ocean State"], SC: ["Columbia", "Charleston", "Palmetto State"],
+  SD: ["Pierre", "Sioux Falls", "Mount Rushmore State"], TN: ["Nashville", "Nashville", "Volunteer State"],
+  TX: ["Austin", "Houston", "Lone Star State"], UT: ["Salt Lake City", "Salt Lake City", "Beehive State"],
+  VT: ["Montpelier", "Burlington", "Green Mountain State"], VA: ["Richmond", "Virginia Beach", "Old Dominion"],
+  WA: ["Olympia", "Seattle", "Evergreen State"], WV: ["Charleston", "Charleston", "Mountain State"],
+  WI: ["Madison", "Milwaukee", "Badger State"], WY: ["Cheyenne", "Cheyenne", "Equality State; Cowboy State"],
+  DC: ["(it is the national capital itself)", "Washington", "the District"],
+  PR: ["San Juan", "San Juan", "Island of Enchantment"], GU: ["Hagåtña", "Dededo", "Where America's Day Begins"],
+  AS: ["Pago Pago", "Tafuna", ""], VI: ["Charlotte Amalie", "Charlotte Amalie", "America's Paradise"],
+  MP: ["Saipan (Capitol Hill)", "Saipan", ""],
+};
+function stateCard(e) {
+  const [cap, big, nick] = S_CARDS[e.id] || [];
+  const kind = e.f.has("st") ? "U.S. state" : e.f.has("terr") ? "U.S. territory" : "federal district (not a state or territory)";
+  const reg = { s_ne: "Northeast", s_mw: "Midwest", s_so: "South", s_we: "West" };
+  const region = Object.keys(reg).find(k => e.f.has(k));
+  const lines = [
+    `${e.name}: ${kind}.`,
+    cap ? `Capital: ${cap}. Largest city: ${big}.` : "",
+    nick ? `Nickname: ${nick}.` : "",
+    region ? `Census region: ${reg[region]}.` : "Not in any Census region.",
+    e.nb.length ? `Borders: ${e.nb.map(id => (S_RAW.find(r => r[0] === id) || [, id])[1]).join(", ")}.` : "Borders no other state.",
+  ];
+  const y = (S_RAW.find(r => r[0] === e.id) || [])[5];
+  if (y) lines.push(`Became a state in ${y}.`);
+  const sf = typeof STATE_FLAGS !== "undefined" ? STATE_FLAGS[e.id] : "";
+  if (sf) lines.push(`Flag: ${sf}`);
+  return lines.filter(Boolean).join(" ");
+}
+
 function buildStates() {
   const ents = S_RAW.map(([id, name, al, kind, reg, year, nbs]) => {
     const f = new Set();
@@ -355,6 +479,7 @@ function buildStates() {
     if (/^[AEIOU]/.test(name)) f.add("nvow");
     return { id, name, aliases: al ? al.split("|") : [], f, nb, notes: S_NOTES[id] || {} };
   });
+  for (const e of ents) e.card = stateCard(e);
   return {
     key: "states", label: "US states", noun: "state or territory", symbol: "🇺🇸",
     ents, questions: S_QUESTIONS.map(([k, t, g, hint]) => ({ k, t, g, hint })),
