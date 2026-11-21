@@ -106,7 +106,12 @@ details summary { cursor: pointer; }
 .thinking::after { content: "…"; animation: dots 1.2s steps(4) infinite; display: inline-block; width: 1.2em; overflow: hidden; vertical-align: bottom; }
 @keyframes dots { from { width: 0; } to { width: 1.2em; } }
 @media (prefers-reduced-motion: reduce) { .thinking::after { animation: none; } }
-.answer { border-bottom: 1px dashed var(--line); padding-bottom: 14px; margin-bottom: 14px; }
+.tsec { font: 600 15px var(--mono); color: var(--you); font-variant-numeric: tabular-nums; }
+.tsec.low { color: var(--bad); }
+.tbar { height: 4px; background: var(--line); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+.tbar > div { height: 100%; width: 100%; background: var(--you); transform-origin: left; }
+.tbar.low > div { background: var(--bad); }
+.answer {border-bottom: 1px dashed var(--line); padding-bottom: 14px; margin-bottom: 14px; }
 .verdict { font: 600 22px/1.2 var(--display); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 6px; }
 .verdict b { display: inline-block; font-size: 34px; padding: 0 10px; margin-left: 4px; border: 3px solid currentColor; border-radius: 4px; transform: rotate(-3deg); }
 .v-yes { color: var(--ok); } .v-no { color: var(--bad); }
@@ -156,6 +161,7 @@ details summary { cursor: pointer; }
 <script>
 "use strict";
 const MAX_TURNS = 20;
+const TURN_SECONDS = 40;   // time to type your question before your turn is passed
 const SITE_URL = "interrogate.pages.dev";
 const HOW_TO_PLAY = "In this daily game, you and an AI will each pick a country (or state or language, depending on which mode you play). You will take turns asking each other yes/no questions, and your goal is to try to guess the AI's country before it guesses yours. The twist? You can both lie at most once!";
 const MODES = { countries: buildCountries(), states: buildStates() };
@@ -445,7 +451,7 @@ function setupHTML() {
   </section>
   <section class="card stack">
     <h3>How a duel works</h3>
-    <p class="muted">A coin flip decides who asks first. On your turn, ask a question or guess. A wrong guess uses your turn.</p>
+    <p class="muted">A coin flip decides who asks first. On your turn, ask a question or guess. A wrong guess uses your turn. You get 40 seconds per question, or your turn is passed.</p>
     <p class="muted">When the AI asks about your ${esc(m.noun)}, a referee shows you the true answer, so you don't need to know it yourself. You can tell the truth, or lie once per game.</p>
     <p class="muted">The AI may also lie once, or not at all. You find out at the end.</p>
   </section>`;
@@ -464,7 +470,8 @@ function scoreHTML() {
 function yourTurnHTML() {
   const m = M();
   return `${S.flash ? `<p class="muted" style="margin-bottom:10px">${S.flash}</p>` : ""}
-    <span class="tag t-you">Your turn · question ${S.yt + 1}</span>
+    <div class="row" style="justify-content:space-between"><span class="tag t-you">Your turn · question ${S.yt + 1}</span><span class="tsec" id="tsec" aria-live="off">${TURN_SECONDS}s</span></div>
+    <div class="tbar"><div id="tfill"></div></div>
     <h2 class="mt">Ask a yes or no question</h2>
     <form class="field mt" id="askForm" novalidate>
       <input type="text" id="ask" autocomplete="off" maxlength="160" placeholder="Type your question" aria-label="Your question">
@@ -478,6 +485,7 @@ function yourTurnHTML() {
 function lastAnswerHTML() {
   const e = [...S.log].reverse().find(x => x.who === "you");
   if (!e) return "";
+  if (e.kind === "pass") return `<div class="answer"><p class="verdict v-no">Time's up. <b>PASS</b></p><p class="muted">You didn't ask a question in time, so your turn was skipped.</p></div>`;
   const q = e.kind === "g" ? `Is it ${M().byId[e.g].name}?` : (e.text || qText(e.k));
   const a = e.kind === "g" ? "WRONG" : e.ans ? "YES" : "NO";
   return `<div class="answer mt0"><p class="muted">You asked: <span style="font-family:var(--mono);color:var(--ink)">"${esc(q)}"</span></p>
@@ -498,7 +506,7 @@ function aiAsksHTML() {
 
 function shareText() {
   const m = M();
-  const line = w => S.log.filter(e => e.who === w).map(e => e.kind === "g" ? (e.ok ? "🎯" : "❌") : (w === "you" ? "🟦" : "🟧")).join("");
+  const line = w => S.log.filter(e => e.who === w).map(e => e.kind === "pass" ? "⬜" : e.kind === "g" ? (e.ok ? "🎯" : "❌") : (w === "you" ? "🟦" : "🟧")).join("");
   const head = `Interrogate ${m.symbol} ${S.practice ? "practice" : "#" + S.day}`;
   const res = S.win === "you" ? `Beat the AI in ${S.yt} turns ⚔️` : S.win === "ai" ? `The AI got me in ${S.at} turns` : `Draw after ${MAX_TURNS} turns`;
   const aiL = S.aiLie ? `🤥 AI lied on Q${S.aiLie}` : S.aiLieAt && S.yt < S.aiLieAt ? "🤫 AI was saving its lie" : "😇 AI stayed honest";
@@ -534,7 +542,9 @@ function logHTML() {
   return S.log.slice().reverse().map(e => {
     const lbl = e.who === "you" ? `<span class="tag t-you">You · Q${e.n}</span>` : `<span class="tag t-ai">AI · Q${e.n}</span>`;
     let txt, ans;
-    if (e.kind === "g") {
+    if (e.kind === "pass") {
+      txt = `<i>pass</i>`; ans = `<span class="muted">Time's up</span>`;
+    } else if (e.kind === "g") {
       txt = `Is it ${esc(M().byId[e.g].name)}?`;
       ans = e.ok ? `<span style="color:var(--ok)">Correct</span>` : `<span style="color:var(--bad)">Wrong</span>`;
     } else {
@@ -570,7 +580,7 @@ function helpHTML() {
     <div class="row" style="justify-content:space-between"><h1>How to play</h1><button class="btn" id="back">Back to the duel</button></div>
     <p>${esc(HOW_TO_PLAY)}</p>
     <h3 class="mt">The details</h3>
-    <p>On your turn, type one yes or no question, or guess with "Is it ___?". A wrong guess still uses the turn. There is no turn limit: the duel goes on until someone guesses right.</p>
+    <p>On your turn, type one yes or no question, or guess with "Is it ___?". A wrong guess still uses the turn. You have 40 seconds to ask each question. If time runs out, you pass. There is no limit on the number of turns: the duel goes on until someone guesses right.</p>
     <p>When the AI asks about your secret, a referee shows the true answer. Tell the truth, or lie once per game. You can't lie on judgement calls (they say "Ruling").</p>
     <p>The AI may also lie once on your questions, or never. It's decided each day and is the same for everyone. You find out at the end.</p>
     <p>There's one duel per mode per day, and the AI's pick is the same for everyone. Share your result without spoiling it.</p>
@@ -642,7 +652,7 @@ function bind() {
     if ($("start")) $("start").onclick = () => {
       S.me = S.pend; track("start", { mode: modeKey, day: S.day, practice: S.practice, me: S.me });
       if (S.first === "ai") return toAI();
-      S.phase = "you"; save(); render();
+      startYourTurn();
     };
   }
   if (S.phase === "you") {
@@ -843,6 +853,13 @@ function youGuess(id, text) {
   S.flash = "";
   toAI();
 }
+function startYourTurn() { S.phase = "you"; S.turnStart = Date.now(); save(); render(); }
+function passTurn() {
+  S.yt++;
+  S.log.push({ who: "you", kind: "pass", n: S.yt });
+  S.flash = "";
+  toAI();
+}
 function toAI() { S.phase = "think"; save(); render(); setTimeout(aiAct, 750); }
 
 function aiAct() {
@@ -881,8 +898,19 @@ function answer(lie) {
   afterAI();
 }
 function afterAI() {
-  S.phase = "you"; save(); render();
+  startYourTurn();
 }
+
+/* ---------- 40-second question timer ---------- */
+setInterval(() => {
+  if (!S || view !== "game" || S.phase !== "you") return;
+  if (!S.turnStart) { S.turnStart = Date.now(); save(); }
+  const left = TURN_SECONDS - (Date.now() - S.turnStart) / 1000;
+  if (left <= 0) { if (!asking) passTurn(); return; }
+  const sec = $("tsec"), fill = $("tfill");
+  if (sec) { sec.textContent = Math.ceil(left) + "s"; sec.classList.toggle("low", left <= 10); }
+  if (fill) { fill.style.transform = `scaleX(${left / TURN_SECONDS})`; fill.parentElement.classList.toggle("low", left <= 10); }
+}, 200);
 
 /* ---------- countdown to the next noon-Pacific release ---------- */
 setInterval(() => {
