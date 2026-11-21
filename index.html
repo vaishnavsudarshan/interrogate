@@ -508,7 +508,8 @@ function shareText() {
   const m = M();
   const line = w => S.log.filter(e => e.who === w).map(e => e.kind === "pass" ? "⬜" : e.kind === "g" ? (e.ok ? "🎯" : "❌") : (w === "you" ? "🟦" : "🟧")).join("");
   const head = `Interrogate ${m.symbol} ${S.practice ? "practice" : "#" + S.day}`;
-  const res = S.win === "you" ? `Beat the AI in ${S.yt} turns ⚔️` : S.win === "ai" ? `The AI got me in ${S.at} turns` : `Draw after ${MAX_TURNS} turns`;
+  const thing = modeKey === "states" ? "state" : "country";
+  const res = S.win === "you" ? `I guessed the AI's ${thing} in ${S.yt} turns ⚔️` : `The AI guessed my ${thing} in ${S.at} turns`;
   const aiL = S.aiLie ? `🤥 AI lied on Q${S.aiLie}` : S.aiLieAt && S.yt < S.aiLieAt ? "🤫 AI was saving its lie" : "😇 AI stayed honest";
   return `${head}\n${res}\nMe ${line("you")}\nAI ${line("ai")}\n${aiL} · ${S.myLie ? "🤥 I lied once" : "😇 I stayed honest"}\n${SITE_URL}`;
 }
