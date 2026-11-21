@@ -751,8 +751,18 @@ function placesIn(text) {
   found.sort((a, b) => b.len - a.len);
   return [...new Map(found.map(f => [f.e.id, f.e])).values()];
 }
+// Words that can surround a guess without changing it: "is it the Central African Republic?",
+// "my guess is Peru", or just "Peru".
+const FILLER = new Set("is it its the a an your my secret country state place answer guess i think maybe could be im going with final".split(" "));
+function bareGuess(t) {
+  const rest = t.split(" ").filter(w => !FILLER.has(w)).join(" ");
+  if (!rest) return [];
+  return M().ents.filter(e => [e.name, ...e.aliases].some(n => !NOT_PLACES.has(norm(n)) && norm(n).split(" ").filter(w => !FILLER.has(w)).join(" ") === rest));
+}
 function localRead(raw) {
   const t = norm(raw);
+  const bare = bareGuess(t);
+  if (bare.length) return { kind: "guess", places: bare };
   const g = t.match(GUESS);
   if (g) {
     const rest = g[g.length - 1].replace(/^the /, "");
