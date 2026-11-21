@@ -162,7 +162,8 @@ details summary { cursor: pointer; }
 "use strict";
 const MAX_TURNS = 20;
 const TURN_SECONDS = 40;   // time to type your question before your turn is passed
-const SITE_URL = "interrogate.pages.dev";
+// Full https address so chat apps (iMessage, WhatsApp, Discord…) turn it into a tappable link.
+const SITE_URL = "https://interrogate.pages.dev";
 const HOW_TO_PLAY = "In this daily game, you and an AI will each pick a country (or state or language, depending on which mode you play). You will take turns asking each other yes/no questions, and your goal is to try to guess the AI's country before it guesses yours. The twist? You can both lie at most once!";
 const MODES = { countries: buildCountries(), states: buildStates() };
 for (const m of Object.values(MODES)) {
@@ -528,7 +529,7 @@ function overHTML() {
   return `<span class="tag t-n">Duel over</span>
     <h1 class="mt">${h}</h1>
     <p class="mt">The AI's ${esc(m.noun)} was <b>${esc(ai.name)}</b>. ${aiL} ${S.myLie ? `You lied on its question ${S.myLie}.` : "You told the truth every time."}</p>
-    <div class="sharebox mt" id="shareText">${esc(shareText())}</div>
+    <div class="sharebox mt" id="shareText">${esc(shareText()).replace(SITE_URL, `<a href="${SITE_URL}" style="color:inherit">${SITE_URL}</a>`)}</div>
     <div class="row mt"><button class="btn primary" id="copy">Copy result</button>${S.practice ? "" : `<span class="muted" id="cdwrap">Next duel in <b id="cd" style="font-variant-numeric:tabular-nums"></b></span>`}</div>
     <p class="muted" id="copied" style="margin-top:6px" aria-live="polite"></p>
     ${showPrompt ? `<div class="prompt mt"><p style="font-weight:600">Keep track of your daily progress?</p><p class="muted" style="margin-top:2px">Log in or create an account to save your streak on any device. You can keep playing without one.</p>
