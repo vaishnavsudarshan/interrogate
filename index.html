@@ -501,7 +501,7 @@ function shareText() {
   const line = w => S.log.filter(e => e.who === w).map(e => e.kind === "g" ? (e.ok ? "🎯" : "❌") : (w === "you" ? "🟦" : "🟧")).join("");
   const head = `Interrogate ${m.symbol} ${S.practice ? "practice" : "#" + S.day}`;
   const res = S.win === "you" ? `Beat the AI in ${S.yt} turns ⚔️` : S.win === "ai" ? `The AI got me in ${S.at} turns` : `Draw after ${MAX_TURNS} turns`;
-  const aiL = S.aiLie ? `🤥 AI lied on Q${S.aiLie}` : S.aiLieAt && S.aq < S.aiLieAt ? "🤫 AI was saving its lie" : "😇 AI stayed honest";
+  const aiL = S.aiLie ? `🤥 AI lied on Q${S.aiLie}` : S.aiLieAt && S.yt < S.aiLieAt ? "🤫 AI was saving its lie" : "😇 AI stayed honest";
   return `${head}\n${res}\nMe ${line("you")}\nAI ${line("ai")}\n${aiL} · ${S.myLie ? "🤥 I lied once" : "😇 I stayed honest"}\n${SITE_URL}`;
 }
 
@@ -513,7 +513,7 @@ function factTable(e) {
 function overHTML() {
   const m = M(), ai = m.byId[S.ai];
   const h = S.win === "you" ? `You beat the AI in ${S.yt} turns` : S.win === "ai" ? `The AI found your ${m.noun} in ${S.at} turns` : `A draw after ${MAX_TURNS} turns each`;
-  const aiL = S.aiLie ? `The AI lied on your question ${S.aiLie}.` : S.aiLieAt && S.aq < S.aiLieAt ? `The AI was saving its lie for your question ${S.aiLieAt}, but the duel ended first.` : "The AI never lied today.";
+  const aiL = S.aiLie ? `The AI lied on your question ${S.aiLie}.` : S.aiLieAt && S.yt < S.aiLieAt ? `The AI was saving its lie for your question ${S.aiLieAt}, but the duel ended first.` : "The AI never lied today.";
   const st = computeStats(modeKey);
   const showPrompt = !S.practice && !user && store.get("tp2:promptDismissed") !== S.day;
   return `<span class="tag t-n">Duel over</span>
@@ -817,7 +817,8 @@ function askFact(k, text, negated) {
   if (k in S.yAsked) { $("askMsg").innerHTML = `<p class="err">You already asked that. The answer was ${S.yAsked[k] !== negated ? "yes" : "no"}.</p>`; return; }
   S.yt++; S.aq++;
   const ai = M().byId[S.ai], t = truth(ai, k);
-  const lie = !S.aiLie && S.aiLieAt > 0 && S.aq >= S.aiLieAt && !noteOf(ai, k);
+  // The day decides one question number for the AI to lie on (or none). Same for everyone.
+  const lie = S.aiLieAt > 0 && S.yt === S.aiLieAt;
   const fact = lie ? !t : t;
   if (lie) S.aiLie = S.yt;
   S.yAsked[k] = fact;
@@ -827,7 +828,9 @@ function askFact(k, text, negated) {
 }
 function askOpen(text, ans) {
   S.yt++; S.aq++;
-  S.log.push({ who: "you", kind: "q", k: "open", text, ans, lie: false, n: S.yt });
+  const lie = S.aiLieAt > 0 && S.yt === S.aiLieAt;
+  if (lie) S.aiLie = S.yt;
+  S.log.push({ who: "you", kind: "q", k: "open", text, ans: lie ? !ans : ans, lie, n: S.yt });
   S.flash = "";
   toAI();
 }
