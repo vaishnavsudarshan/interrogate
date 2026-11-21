@@ -492,7 +492,7 @@ function lastAnswerHTML() {
   if (!e) return "";
   if (e.kind === "pass") return `<div class="answer"><p class="verdict v-no">Time's up. <b>PASS</b></p><p class="muted">You didn't ask a question in time, so your turn was skipped.</p></div>`;
   const q = e.kind === "g" ? `Is it ${M().byId[e.g].name}?` : (e.text || qText(e.k));
-  const a = e.kind === "g" ? "WRONG" : e.ans ? "YES" : "NO";
+  const a = e.kind === "g" ? "NO" : e.ans ? "YES" : "NO";
   return `<div class="answer mt0"><p class="muted">You asked: <span style="font-family:var(--mono);color:var(--ink)">"${esc(q)}"</span></p>
     <p class="verdict ${a === "YES" ? "v-yes" : "v-no"}">The AI says: <b>${a}</b></p></div>`;
 }
@@ -552,7 +552,7 @@ function logHTML() {
       txt = `<i>pass</i>`; ans = `<span class="muted">Time's up</span>`;
     } else if (e.kind === "g") {
       txt = `Is it ${esc(M().byId[e.g].name)}?`;
-      ans = e.ok ? `<span style="color:var(--ok)">Correct</span>` : `<span style="color:var(--bad)">Wrong</span>`;
+      ans = e.ok ? "Yes" : "No";
     } else {
       txt = esc(e.text || qText(e.k));
       const show = e.lie && (e.who === "ai" || S.phase === "over");
@@ -929,7 +929,7 @@ function aiAct() {
     S.log.push({ who: "ai", kind: "g", g: e.id, ok, n: S.at });
     if (ok) return finish("ai");
     S.aiGuessed.push(e.id);
-    S.flash = `The AI guessed ${esc(e.name)}. Wrong!`;
+    S.flash = `The AI asked "Is it ${esc(e.name)}?" The answer was no.`;
     afterAI();
   };
   if (pool.length === 1) return guess(pool[0]);
