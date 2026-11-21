@@ -614,18 +614,34 @@ function aiStatusHTML() {
     : `<p><b>🟢 Claude is answering new questions.</b></p>`;
   return `${head}<p class="muted">Today (UTC): ${n("claude_ok")} answered by Claude · ${n("cache_exact")} from the cache · ${n("cache_reworded")} matched a reworded question · ${n("free_answered")} by the free AI${aiStatus.cacheConfigured ? "" : " · the shared cache isn't connected (add the DB binding)"}.</p>`;
 }
-let remoteStats = null;
+let remoteStats = null, remoteStatsError = "";
 async function loadRemoteStats() {
+  remoteStats = {}; remoteStatsError = "";
+  const add = (day, delta) => { const r = remoteStats[day] = remoteStats[day] || {}; for (const k in delta) r[k] = (r[k] || 0) + delta[k]; };
+  // Daily running totals (the current format).
   try {
     const snap = await FB.db.collection("stats").orderBy(firebase.firestore.FieldPath.documentId(), "desc").limit(90).get();
-    remoteStats = {};
     snap.forEach(d => {
       if (d.id < LAUNCH_DATE) return;
       const raw = d.data(), scale = raw.sample && raw.sample < 1 ? 1 / raw.sample : 1, row = {};
       for (const k in raw) if (k !== "sample" && typeof raw[k] === "number") row[k] = Math.round(raw[k] * scale);
-      row._sampled = scale > 1; remoteStats[d.id] = row;
+      add(d.id, row); if (scale > 1) remoteStats[d.id]._sampled = true;
     });
-  } catch (e) { remoteStats = {}; console.warn(e); }
+  } catch (e) { remoteStatsError = `Couldn't read the daily totals (${e.code || e.message}).`; }
+  // Games from launch day saved in the first format, one record per event.
+  try {
+    const snap = await FB.db.collection("events").limit(5000).get();
+    const seen = {};
+    snap.forEach(d => {
+      const e = d.data(); if (!e || !e.t || !e.type) return;
+      const day = dateKey(new Date(e.t)); if (day < LAUNCH_DATE) return;
+      const delta = {};
+      if (e.type === "start") { delta.started = 1; if (e.practice) delta.practice = 1; if (e.me) delta[`pick_${e.mode}_${e.me}`] = 1; const k = day + "|" + e.pid; if (e.pid && !seen[k]) { seen[k] = 1; delta.players = 1; } }
+      if (e.type === "end") { delta.finished = 1; if (e.win === "you") { delta.wins_you = 1; delta.turns_to_win = e.yt || 0; } if (e.win === "ai") delta.wins_ai = 1; if (e.myLie) delta.lied_you = 1; if (e.aiLie) delta.lied_ai = 1; for (const q of e.asked || []) { const f = `ask_${e.mode}_${String(q).startsWith("b:") ? "border" : q}`; delta[f] = (delta[f] || 0) + 1; } }
+      if (e.type === "share") delta.shares = 1;
+      add(day, delta);
+    });
+  } catch (e) { /* older records are optional; the rules may not allow reading them yet */ }
   if (view === "stats") render();
 }
 function metricsHTML() {
@@ -634,7 +650,7 @@ function metricsHTML() {
   const days = everyone ? remoteStats : store.get("tp2:stats", {});
   const source = everyone ? "These numbers cover every player's games."
     : FB && user ? `These numbers only cover this browser. To see everyone's games, add your user ID <code>${esc(user.uid)}</code> to OWNER_UIDS in firebase-config.js and to the database rules (SETUP.md, step 6).`
-    : FB ? "These numbers only cover this browser. Log in with the owner account to see everyone's games."
+    : FB ? "<b>You're not logged in.</b> These numbers only cover this browser. Click <b>Log in</b> (top right) with your owner account to see everyone's games."
     : "These numbers only cover games played in this browser.";
   const T = {};
   for (const r of Object.values(days)) for (const k in r) if (typeof r[k] === "number") T[k] = (T[k] || 0) + r[k];
@@ -648,6 +664,8 @@ function metricsHTML() {
   return `<section class="card stack">
     <div class="row" style="justify-content:space-between"><h1>Owner stats</h1><a class="btn" href="#">Back to the game</a></div>
     <p class="muted">${source}${sampled ? " Some days were sampled, so their numbers are estimates." : ""}</p>
+    ${everyone && remoteStatsError ? `<p class="err">${esc(remoteStatsError)} Check that the latest database rules are published in Firebase.</p>` : ""}
+    ${!everyone && FB && user ? `<p class="err">You're logged in, but not with the owner account, so these are only this browser's games. Log out and log in with the account you made first.</p>` : ""}
     <div style="background:var(--chip);border-radius:10px;padding:10px 12px"><h3 style="margin-bottom:4px">AI question reader</h3>${aiStatusHTML()}</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px">
       ${tile("Player-days", n("players"))}${tile("Duels started", n("started"))}${tile("Duels finished", n("finished"))}
