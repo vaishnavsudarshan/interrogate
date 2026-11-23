@@ -162,7 +162,7 @@ details summary { cursor: pointer; }
 <script>
 "use strict";
 const MAX_TURNS = 20;
-const TURN_SECONDS = 40;   // time to type your question before your turn is passed
+const TURN_SECONDS = 60;   // time to type your question before your turn is passed
 // Full https address so chat apps (iMessage, WhatsApp, Discord…) turn it into a tappable link.
 const SITE_URL = "https://interrogate.pages.dev";
 const HOW_TO_PLAY = "In this daily game, you and an AI will each pick a country (or state or language, depending on which mode you play). You will take turns asking each other yes/no questions, and your goal is to try to guess the AI's country before it guesses yours. The twist? You can both lie at most once!";
@@ -456,7 +456,7 @@ function setupHTML() {
   </section>
   <section class="card stack">
     <h3>How a duel works</h3>
-    <p class="muted">A coin flip decides who asks first. On your turn, ask a question or guess. A wrong guess uses your turn. You get 40 seconds per question, or your turn is passed.</p>
+    <p class="muted">A coin flip decides who asks first. On your turn, ask a question or guess. A wrong guess uses your turn. You get 1 minute per question, or your turn is passed.</p>
     <p class="muted">When the AI asks about your ${esc(m.noun)}, a referee shows you the true answer, so you don't need to know it yourself. You can tell the truth, or lie once per game.</p>
     <p class="muted">The AI may also lie once, or not at all. You find out at the end.</p>
   </section>`;
@@ -586,7 +586,7 @@ function helpHTML() {
     <div class="row" style="justify-content:space-between"><h1>How to play</h1><button class="btn" id="back">Back to the duel</button></div>
     <p>${esc(HOW_TO_PLAY)}</p>
     <h3 class="mt">The details</h3>
-    <p>On your turn, type one yes or no question, or guess with "Is it ___?". A wrong guess still uses the turn. You have 40 seconds to ask each question. If time runs out, you pass. There is no limit on the number of turns: the duel goes on until someone guesses right.</p>
+    <p>On your turn, type one yes or no question, or guess with "Is it ___?". A wrong guess still uses the turn. You have 1 minute to ask each question. If time runs out, you pass. There is no limit on the number of turns: the duel goes on until someone guesses right.</p>
     <p>When the AI asks about your secret, a referee shows the true answer. Tell the truth, or lie once per game. You can't lie on judgement calls (they say "Ruling").</p>
     <p>The AI may also lie once on your questions, or never. It's decided each day and is the same for everyone. You find out at the end.</p>
     <p>There's one duel per mode per day, and the AI's pick is the same for everyone. Share your result without spoiling it.</p>
@@ -741,6 +741,7 @@ function finish(win) {
 // Common phrasings are matched here, instantly and for free. Anything else goes to the AI.
 const NEG = /\b(not|isn ?t|doesn ?t|aren ?t|don ?t|never|without|outside)\b/;
 const MULTI = /\b(or|and|but)\b/;
+const DEFER = /\b(indo|family|families|dialects?|flag|flags|capital|currency|money|religion|religious|colony|colonies|colonized|colonised|empire|war|wars|independent|independence|anthem|famous|food|cuisine|dish|sport|sports|team|president|prime minister|leader|founded|history|historically|ever|used to|once|former|formerly|entirely|partly|partially|mostly|completely|whole|(north|south|east|west)(ern)? of|compared|older|newer|richer|poorer)\b/;
 const PATTERNS = {
   countries: [
     ["eu", /\b(european union|eu)\b/], ["r_me", /\bmiddle east/], ["r_sea", /\bsouth ?east(ern)? asia/], ["r_sas", /\bsouth(ern)? asia/],
@@ -813,6 +814,9 @@ function localRead(raw) {
     if (exact.length) return { kind: "guess", places: exact };
   }
   if (NEG.test(t) || MULTI.test(t)) return null;
+  // Questions about these topics need real reading, so they always go to the AI,
+  // even if a word inside them looks like a simple fact ("Indo-European language" is not "in Europe").
+  if (DEFER.test(t)) return null;
   for (const [k, re, neg] of EARLY[modeKey]) if (re.test(t)) return { kind: "fact", key: k, negated: !!neg };
   if (modeKey === "countries" && LANG_CUE.test(t)) {
     const hits = LANGS.filter(([, w]) => new RegExp(`\\b${w}\\b`).test(t));
@@ -830,12 +834,20 @@ function localRead(raw) {
   }
   return null;
 }
+// The secret's fact card, plus the location facts of any other place the question names,
+// so comparisons like "Is it entirely south of Switzerland?" can be worked out from data.
+function cardWithOthers(raw) {
+  const m = M(), secret = m.byId[S.ai];
+  const pick = e => (e.card || "").split(/(?<=\.)\s+/).filter(s => /^(Extent|Rough center of the country|Area|Continent|Region|Land borders|Population):/.test(s)).join(" ");
+  const others = placesIn(raw).filter(e => e.id !== secret.id).slice(0, 3);
+  return (secret.card || "") + (others.length ? `\n\nFor comparison, other places named in the question:\n${others.map(e => `${e.name}: ${pick(e)}`).join("\n")}` : "");
+}
 async function aiRead(raw) {
   if (!window.QUESTION_AI_URL) return { kind: "unavailable" };
   const m = M();
   const res = await fetch(window.QUESTION_AI_URL, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question: raw, noun: m.noun, secret: m.byId[S.ai].name, card: m.byId[S.ai].card || "", facts: m.questions.map(q => ({ k: q.k, t: q.t, hint: q.hint || "" })) }),
+    body: JSON.stringify({ question: raw, noun: m.noun, secret: m.byId[S.ai].name, card: cardWithOthers(raw), facts: m.questions.map(q => ({ k: q.k, t: q.t, hint: q.hint || "" })) }),
   });
   if (!res.ok) throw new Error("reader " + res.status);
   return res.json();
