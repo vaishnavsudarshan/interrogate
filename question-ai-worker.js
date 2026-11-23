@@ -197,18 +197,21 @@ export default {
     const secret = String(body.secret || "").slice(0, 80);
     const card = String(body.card || "").slice(0, 6000);
     const facts = Array.isArray(body.facts) ? body.facts.slice(0, 80) : [];
+    // "fresh": the player said the earlier reading was wrong, so skip the caches and ask the AI again.
+    const fresh = body.fresh === true;
+    let src = "";
     const q = normQ(question);
     if (!q) return reply({ kind: "invalid", message: "Type a question first." });
     const sKey = `${noun}|${secret}`;
     const mKey = `${sKey}|${q}`;
 
     // 1. Exact cache.
-    if (memo.has(mKey)) { await count(env, "cache_exact"); return reply(memo.get(mKey)); }
+    if (!fresh && memo.has(mKey)) { await count(env, "cache_exact"); return reply({ ...memo.get(mKey), src: "cache" }); }
     if (env.DB) {
       try {
         await ensureTables(env);
         const row = await env.DB.prepare("SELECT v FROM qa WHERE s = ? AND q = ?").bind(sKey, q).first();
-        const v = row && JSON.parse(row.v); if (v && v.kind !== "unknown") { remember(mKey, v); await count(env, "cache_exact"); return reply(v); }
+        const v = !fresh && row && JSON.parse(row.v); if (v && v.kind !== "unknown") { remember(mKey, v); await count(env, "cache_exact"); return reply({ ...v, src: "cache" }); }
       } catch (e) {}
     }
 
@@ -217,8 +220,8 @@ export default {
     if (env.DB) {
       try {
         vec = await embed(env, q);
-        const v = await reworded(env, sKey, q, vec);
-        if (v) { remember(mKey, v); await save(env, sKey, q, v, vec); await count(env, "cache_reworded"); return reply(v); }
+        const v = fresh ? null : await reworded(env, sKey, q, vec);
+        if (v) { remember(mKey, v); await save(env, sKey, q, v, vec); await count(env, "cache_reworded"); return reply({ ...v, src: "reworded" }); }
       } catch (e) {}
     }
 
@@ -226,13 +229,13 @@ export default {
     const factList = facts.map(f => `${String(f.k).slice(0, 20)}: ${String(f.t).slice(0, 80)}${f.hint ? ` (${String(f.hint).slice(0, 100)})` : ""}`).join("\n");
     let result = null, busy = false;
     if (env.ANTHROPIC_API_KEY) {
-      try { const p = await askClaude(env, buildPrompt(noun, secret, card, factList, false), question); if (valid(p, facts)) { result = p; await count(env, "claude_ok"); } }
+      try { const p = await askClaude(env, buildPrompt(noun, secret, card, factList, false), question); if (valid(p, facts)) { result = p; src = "claude"; await count(env, fresh ? "claude_reread" : "claude_ok"); } }
       catch (e) { lastClaudeError = `${new Date().toISOString()} ${String(e.message || e).slice(0, 240)}`; await count(env, "claude_failed"); }
     }
     if (!result) {
       const system = buildPrompt(noun, secret, card, factList, true);
       for (const model of [FREE_SMALL, FREE_BIG]) {
-        try { const p = await askFree(env, model, system, question); if (valid(p, facts)) { result = p; await count(env, "free_answered"); break; } }
+        try { const p = await askFree(env, model, system, question); if (valid(p, facts)) { result = p; src = "free"; await count(env, "free_answered"); break; } }
         catch (e) { if (String(e).match(/limit|quota|neuron|429|capacity/i)) busy = true; }
       }
     }
@@ -245,7 +248,7 @@ export default {
 
     if (clean.kind !== "unknown") remember(mKey, clean);
     if (clean.kind !== "clarify" && clean.kind !== "unknown") await save(env, sKey, q, clean, vec);
-    return reply(clean);
+    return reply({ ...clean, src });
   },
 };
 

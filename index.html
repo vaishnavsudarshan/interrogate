@@ -493,8 +493,27 @@ function lastAnswerHTML() {
   if (e.kind === "pass") return `<div class="answer"><p class="verdict v-no">Time's up. <b>PASS</b></p><p class="muted">You didn't ask a question in time, so your turn was skipped.</p></div>`;
   const q = e.kind === "g" ? `Is it ${M().byId[e.g].name}?` : (e.text || qText(e.k));
   const a = e.kind === "g" ? "NO" : e.ans ? "YES" : "NO";
+  // How the game understood the question, with a way to have the smart AI read it again.
+  const readAs = e.kind === "q" && e.k !== "open" ? qText(e.k) + (e.neg ? " (asked the opposite way)" : "") : "";
+  const canRedo = e.kind === "q" && !e.fresh && S.log[S.log.length - 1] === e && (S.phase === "think" || S.phase === "aiAsks");
   return `<div class="answer mt0"><p class="muted">You asked: <span style="font-family:var(--mono);color:var(--ink)">"${esc(q)}"</span></p>
-    <p class="verdict ${a === "YES" ? "v-yes" : "v-no"}">The AI says: <b>${a}</b></p></div>`;
+    <p class="verdict ${a === "YES" ? "v-yes" : "v-no"}">The AI says: <b>${a}</b></p>
+    ${readAs ? `<p class="muted" style="margin-top:6px">Read as: "${esc(readAs)}"</p>` : ""}
+    ${canRedo ? `<button class="btn mt" id="redo">That's not what I meant</button> <span class="muted">You'll keep your turn.</span>` : ""}</div>`;
+}
+// Take back the last question (and the AI's reply turn, if it started) and have the smart AI read it fresh.
+function redoLast() {
+  const e = S.log[S.log.length - 1];
+  if (!e || e.who !== "you" || e.kind !== "q") return;
+  clearTimeout(aiTimer);
+  if (S.phase === "aiAsks") { S.at--; S.aAsked.pop(); S.cur = null; }
+  S.log.pop();
+  S.yt--; S.aq--;
+  if (e.k !== "open") delete S.yAsked[e.k];
+  if (e.lie) S.aiLie = 0;
+  S.flash = "";
+  startYourTurn();
+  handleQuestion(e.text, { fresh: true });
 }
 function aiAsksHTML() {
   const me = M().byId[S.me], k = S.cur, t = truth(me, k), n = noteOf(me, k);
@@ -703,6 +722,7 @@ function bind() {
     $("ask").addEventListener("input", () => { if ($("askMsg").querySelector(".err")) $("askMsg").innerHTML = ""; });
     setTimeout(() => { const i = $("ask"); if (i && window.innerWidth > 700) i.focus(); }, 0);
   }
+  if ($("redo")) $("redo").onclick = redoLast;
   if (S.phase === "aiAsks") {
     $("truth").onclick = () => answer(false);
     if (!$("lie").disabled) $("lie").onclick = () => answer(true);
@@ -842,25 +862,27 @@ function cardWithOthers(raw) {
   const others = placesIn(raw).filter(e => e.id !== secret.id).slice(0, 3);
   return (secret.card || "") + (others.length ? `\n\nFor comparison, other places named in the question:\n${others.map(e => `${e.name}: ${pick(e)}`).join("\n")}` : "");
 }
-async function aiRead(raw) {
+async function aiRead(raw, fresh) {
   if (!window.QUESTION_AI_URL) return { kind: "unavailable" };
   const m = M();
   const res = await fetch(window.QUESTION_AI_URL, {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question: raw, noun: m.noun, secret: m.byId[S.ai].name, card: cardWithOthers(raw), facts: m.questions.map(q => ({ k: q.k, t: q.t, hint: q.hint || "" })) }),
+    body: JSON.stringify({ question: raw, fresh: !!fresh, noun: m.noun, secret: m.byId[S.ai].name, card: cardWithOthers(raw), facts: m.questions.map(q => ({ k: q.k, t: q.t, hint: q.hint || "" })) }),
   });
   if (!res.ok) throw new Error("reader " + res.status);
   return res.json();
 }
 let asking = false;
-async function handleQuestion(raw) {
+async function handleQuestion(raw, opts = {}) {
   const msg = $("askMsg"), text = raw.trim();
   if (!text) { msg.innerHTML = `<p class="err">Type a question first.</p>`; return; }
   if (asking) return;
-  let r = localRead(text);
+  let r = opts.fresh ? null : localRead(text);
+  if (r) r.src = "quick";
   if (!r) {
     asking = true; $("askGo").disabled = true; msg.innerHTML = `<p class="muted thinking">Reading your question</p>`;
-    try { r = await aiRead(text); } catch { r = { kind: "unavailable" }; }
+    try { r = await aiRead(text, opts.fresh); } catch { r = { kind: "unavailable" }; }
+    if (opts.fresh) r.fresh = true;
     asking = false; if ($("askGo")) $("askGo").disabled = false;
     if (S.phase !== "you") return;
     if (r.place) { const p = placesIn(r.place); r.places = p.length ? p : search(r.place).slice(0, 12); }
@@ -874,13 +896,13 @@ async function handleQuestion(raw) {
   };
   switch (r.kind) {
     case "guess": return pickPlace(r.places, "guess", e => youGuess(e.id, text));
-    case "border": return pickPlace(r.places, "border", e => askFact("b:" + e.id, text, !!r.negated));
+    case "border": return pickPlace(r.places, "border", e => askFact("b:" + e.id, text, !!r.negated, r));
     case "fact":
       if (!M().qByK[r.key]) return say(`<p class="err">I couldn't work that one out. Try asking it a different way.</p>`);
-      return askFact(r.key, text, !!r.negated);
+      return askFact(r.key, text, !!r.negated, r);
     case "open":
       if (r.answer !== "yes" && r.answer !== "no") return say(`<p class="err">I couldn't work that one out. Try asking it a different way.</p>`);
-      return askOpen(text, r.answer === "yes");
+      return askOpen(text, r.answer === "yes", r);
     case "clarify": return say(`<div class="pickbox"><p><b>Quick question back:</b> ${esc(r.message || "Can you say that more specifically?")}</p><p class="muted" style="margin-top:6px">Rephrase and ask again. This doesn't use a turn.</p></div>`);
     case "invalid": return say(`<p class="err">${esc(r.message || "That needs a yes or no answer. Try rephrasing it.")}</p>`);
     case "unknown": return say(`<div class="pickbox"><p><b>The AI can't confirm that one.</b> Ask something else.</p><p class="muted" style="margin-top:6px">This doesn't use a turn.</p></div>`);
@@ -889,8 +911,12 @@ async function handleQuestion(raw) {
   }
 }
 
-function askFact(k, text, negated) {
-  if (k in S.yAsked) { $("askMsg").innerHTML = `<p class="err">You already asked that. The answer was ${S.yAsked[k] !== negated ? "yes" : "no"}.</p>`; return; }
+function askFact(k, text, negated, src = {}) {
+  if (k in S.yAsked) {
+    $("askMsg").innerHTML = `<p class="err">That reads as "${esc(qText(k))}", which you already asked. The answer was ${S.yAsked[k] !== negated ? "yes" : "no"}.</p>${src.fresh ? "" : `<button class="btn mt" id="dupRedo">That's not what I meant</button>`}`;
+    if ($("dupRedo")) $("dupRedo").onclick = () => handleQuestion(text, { fresh: true });
+    return;
+  }
   S.yt++; S.aq++;
   const ai = M().byId[S.ai], t = truth(ai, k);
   // The day decides one question number for the AI to lie on (or none). Same for everyone.
@@ -898,15 +924,15 @@ function askFact(k, text, negated) {
   const fact = lie ? !t : t;
   if (lie) S.aiLie = S.yt;
   S.yAsked[k] = fact;
-  S.log.push({ who: "you", kind: "q", k, text, ans: negated ? !fact : fact, lie, n: S.yt });
+  S.log.push({ who: "you", kind: "q", k, text, ans: negated ? !fact : fact, lie, n: S.yt, src: src.src || "", fresh: !!src.fresh, neg: !!negated });
   S.flash = "";
   toAI();
 }
-function askOpen(text, ans) {
+function askOpen(text, ans, src = {}) {
   S.yt++; S.aq++;
   const lie = S.aiLieAt > 0 && S.yt === S.aiLieAt;
   if (lie) S.aiLie = S.yt;
-  S.log.push({ who: "you", kind: "q", k: "open", text, ans: lie ? !ans : ans, lie, n: S.yt });
+  S.log.push({ who: "you", kind: "q", k: "open", text, ans: lie ? !ans : ans, lie, n: S.yt, src: src.src || "", fresh: !!src.fresh });
   S.flash = "";
   toAI();
 }
@@ -926,7 +952,8 @@ function passTurn() {
   S.flash = "";
   toAI();
 }
-function toAI() { S.phase = "think"; save(); render(); setTimeout(aiAct, 750); }
+let aiTimer = null;
+function toAI() { S.phase = "think"; save(); render(); clearTimeout(aiTimer); aiTimer = setTimeout(aiAct, 750); }
 
 function aiAct() {
   if (S.phase !== "think") return;
