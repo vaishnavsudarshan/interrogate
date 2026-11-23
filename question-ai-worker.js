@@ -2,7 +2,7 @@
 // Paste this whole file into the Cloudflare Worker editor. Bindings and secrets:
 //   - AI                 Workers AI binding (required)
 //   - DB                 D1 database binding (strongly recommended: the shared answer cache)
-//   - ANTHROPIC_API_KEY  secret (optional). When set, Claude Haiku answers new questions.
+//   - ANTHROPIC_API_KEY  secret (optional). When set, Claude Opus 5.5 answers new questions.
 //                        If Claude can't be reached, the free model answers from the fact card.
 // The dashboard editor can't install npm packages, so Claude is called over plain HTTPS.
 //
@@ -25,7 +25,10 @@
 //   { kind: "busy" }                     rate limited or out of AI allowance for now
 // GET /status returns today's counts for the owner stats page.
 
-const CLAUDE_MODEL = "claude-haiku-5-5";
+// Claude Opus 5.5: the most capable standard model. "medium" effort lets it reason briefly
+// (comparisons, directions) before answering.
+const CLAUDE_MODEL = "claude-opus-5-5";
+const CLAUDE_EFFORT = "medium";
 const FREE_SMALL = "@cf/meta/llama-3.1-8b-instruct-fast";
 const FREE_BIG = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const EMBED = "@cf/baai/bge-small-en-v1.5";
@@ -96,17 +99,23 @@ const SCHEMA = {
 async function askClaude(env, system, question) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2026-10-21" },
+    headers: {
+      "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2026-10-21",
+      // If a safety check ever declines a question, the API retries it on a fallback model.
+      "anthropic-beta": "server-side-fallback-2026-07-01",
+    },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 2000,
-      output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
+      max_tokens: 8000,
+      fallbacks: "default",
+      output_config: { effort: CLAUDE_EFFORT, format: { type: "json_schema", schema: SCHEMA } },
       system,
       messages: [{ role: "user", content: question }],
     }),
   });
   if (!res.ok) throw new Error(`Claude returned ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const msg = await res.json();
+  if (msg.stop_reason === "refusal") return { kind: "unknown" };
   if (msg.stop_reason !== "end_turn") throw new Error("Claude stopped: " + msg.stop_reason);
   return JSON.parse((msg.content || []).filter(b => b.type === "text").map(b => b.text).join(""));
 }
@@ -130,7 +139,7 @@ async function reworded(env, secret, question, vec) {
   const rows = (await env.DB.prepare("SELECT q, v, e FROM qa WHERE s = ? AND e IS NOT NULL ORDER BY t DESC LIMIT 400").bind(secret).all()).results || [];
   const dir = dirWords(question);
   const near = rows.map(r => ({ q: r.q, v: JSON.parse(r.v), sim: cosine(vec, JSON.parse(r.e)) }))
-    .filter(r => r.sim >= SIMILAR && dirWords(r.q) === dir && ["fact", "border", "open", "unknown"].includes(r.v.kind))
+    .filter(r => r.sim >= SIMILAR && dirWords(r.q) === dir && ["fact", "border", "open"].includes(r.v.kind))
     .sort((a, b) => b.sim - a.sim).slice(0, 5);
   if (!near.length) return null;
   const list = near.map((r, i) => `${i + 1}. "${r.q}"`).join("\n");
@@ -199,7 +208,7 @@ export default {
       try {
         await ensureTables(env);
         const row = await env.DB.prepare("SELECT v FROM qa WHERE s = ? AND q = ?").bind(sKey, q).first();
-        if (row) { const v = JSON.parse(row.v); remember(mKey, v); await count(env, "cache_exact"); return reply(v); }
+        const v = row && JSON.parse(row.v); if (v && v.kind !== "unknown") { remember(mKey, v); await count(env, "cache_exact"); return reply(v); }
       } catch (e) {}
     }
 
@@ -234,8 +243,8 @@ export default {
     for (const f of ["key", "place", "answer", "message"]) if (typeof result[f] === "string") clean[f] = result[f].slice(0, 160);
     if (typeof result.negated === "boolean") clean.negated = result.negated;
 
-    remember(mKey, clean);
-    if (clean.kind !== "clarify") await save(env, sKey, q, clean, vec);
+    if (clean.kind !== "unknown") remember(mKey, clean);
+    if (clean.kind !== "clarify" && clean.kind !== "unknown") await save(env, sKey, q, clean, vec);
     return reply(clean);
   },
 };
