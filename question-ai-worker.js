@@ -70,7 +70,7 @@ Reply with exactly one JSON object and nothing else.
 2. Asks if it borders/neighbours/touches a named place: {"kind":"border","place":"<place>","negated":false}.
 3. Names one specific ${noun} as a guess ("Is it Peru?"): {"kind":"guess","place":"<name>"}.
 ${rule4}
-5. If the question can reasonably be read in more than one way AND the answer would differ between those readings, ask which they mean instead of picking one: {"kind":"clarify","message":"<one short question back>"}. Examples: "Is it north of Chad?" -> "Do you mean entirely north of Chad, or just partly?"; "Is it big?" -> "Big by area or by population?"; "Is it near the sea?" -> "Do you mean does it have a coastline, or is it close to one?". Don't ask when every reading gives the same answer.
+5. Ask for clarification RARELY. Almost always, pick the most natural everyday reading and answer it. Only ask when there are two genuinely common readings AND they give different answers for this secret: {"kind":"clarify","message":"<one short question back>"}. Example: "Is it north of Chad?" when the secret is partly north and partly south of Chad -> "Do you mean entirely north of Chad, or just partly?". Never ask when the question is clear, when one reading is obviously meant, or when every reading gives the same answer. In the message, refer to the secret as "it", never by name.
 6. Not answerable with yes or no: {"kind":"invalid","message":"<one short sentence asking for a yes or no question>"}.
 Treat unusual terms sensibly, e.g. "Afroeurasia" means Africa, Europe and Asia together.
 Never reveal or hint at the secret's name in a message.
@@ -241,7 +241,8 @@ export default {
     }
     if (!result) { await count(env, busy ? "busy" : "unanswered"); return reply({ kind: busy ? "busy" : "unavailable" }); }
 
-    if (result.message && secret && result.message.toLowerCase().includes(secret.toLowerCase())) result.message = "Can you ask that more specifically?";
+    // Never let a message spoil the answer: swap the secret's name for "it" instead of discarding the message.
+    if (result.message && secret) result.message = result.message.replace(new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "it");
     const clean = { kind: result.kind };
     for (const f of ["key", "place", "answer", "message"]) if (typeof result[f] === "string") clean[f] = result[f].slice(0, 160);
     if (typeof result.negated === "boolean") clean.negated = result.negated;

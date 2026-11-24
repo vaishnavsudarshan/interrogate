@@ -530,7 +530,7 @@ function aiAsksHTML() {
 
 function shareText() {
   const m = M();
-  const line = w => S.log.filter(e => e.who === w).map(e => e.kind === "pass" ? "⬜" : e.kind === "g" ? (e.ok ? "🎯" : "❌") : (w === "you" ? "🟦" : "🟧")).join("");
+  const line = w => S.log.filter(e => e.who === w).map(e => e.kind === "pass" ? "⬜" : e.kind === "g" && e.ok ? "🎯" : (w === "you" ? "🟦" : "🟧")).join("");
   const head = `Interrogate ${m.symbol} ${S.practice ? "practice" : "#" + S.day}`;
   const thing = modeKey === "states" ? "state" : "country";
   const res = S.win === "you" ? `I guessed the AI's ${thing} in ${S.yt} turns ⚔️` : `The AI guessed my ${thing} in ${S.at} turns`;
@@ -837,6 +837,8 @@ function localRead(raw) {
   // Questions about these topics need real reading, so they always go to the AI,
   // even if a word inside them looks like a simple fact ("Indo-European language" is not "in Europe").
   if (DEFER.test(t)) return null;
+  // Only short, plain questions are matched here. Anything longer goes to Claude, which reads it properly.
+  if (t.split(" ").length > 6) return null;
   for (const [k, re, neg] of EARLY[modeKey]) if (re.test(t)) return { kind: "fact", key: k, negated: !!neg };
   if (modeKey === "countries" && LANG_CUE.test(t)) {
     const hits = LANGS.filter(([, w]) => new RegExp(`\\b${w}\\b`).test(t));
