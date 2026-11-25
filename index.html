@@ -607,7 +607,7 @@ function helpHTML() {
     <h3 class="mt">The details</h3>
     <p>On your turn, type one yes or no question, or guess with "Is it ___?". A wrong guess still uses the turn. You have 1 minute to ask each question. If time runs out, you pass. There is no limit on the number of turns: the duel goes on until someone guesses right.</p>
     <p>When the AI asks about your secret, a referee shows the true answer. Tell the truth, or lie once per game. You can't lie on judgement calls (they say "Ruling").</p>
-    <p>The AI may also lie once on your questions, or never. It's decided each day and is the same for everyone. You find out at the end.</p>
+    <p>The AI may also lie once on your questions, or never. It's decided each day and is the same for everyone. You find out at the end. Suspicious of an answer? You can ask the same question again (it uses a turn).</p>
     <p>There's one duel per mode per day, and the AI's pick is the same for everyone. Share your result without spoiling it.</p>
     <h3 class="mt">Rulings for ${esc(m.label.toLowerCase())}</h3>
     ${m.rules.map(r => `<p class="muted">${esc(r)}</p>`).join("")}
@@ -914,11 +914,7 @@ async function handleQuestion(raw, opts = {}) {
 }
 
 function askFact(k, text, negated, src = {}) {
-  if (k in S.yAsked) {
-    $("askMsg").innerHTML = `<p class="err">That reads as "${esc(qText(k))}", which you already asked. The answer was ${S.yAsked[k] !== negated ? "yes" : "no"}.</p>${src.fresh ? "" : `<button class="btn mt" id="dupRedo">That's not what I meant</button>`}`;
-    if ($("dupRedo")) $("dupRedo").onclick = () => handleQuestion(text, { fresh: true });
-    return;
-  }
+  // Repeats are allowed on purpose: asking again is how a player catches the AI's one lie.
   S.yt++; S.aq++;
   const ai = M().byId[S.ai], t = truth(ai, k);
   // The day decides one question number for the AI to lie on (or none). Same for everyone.
